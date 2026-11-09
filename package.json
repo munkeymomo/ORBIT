@@ -1,0 +1,106 @@
+{
+  "name": "orbit",
+  "private": true,
+  "version": "1.0.0",
+  "description": "ORBIT — a visual, local-first productivity workspace",
+  "author": {
+    "name": "Dr Mark Isaacs",
+    "email": "munkeymomo@gmail.com"
+  },
+  "license": "MIT",
+  "funding": "https://ko-fi.com/markisaacschem",
+  "type": "module",
+  "main": "electron/main.cjs",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc -b && vite build",
+    "preview": "vite preview --port 4173 --strictPort",
+    "typecheck": "tsc -b",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "e2e": "playwright test",
+    "rebuild": "tsc -b && vite build",
+    "build:single": "tsc -b && vite build --mode single",
+    "desktop": "npm run build && electron .",
+    "dist:win": "npm run build && electron-builder --win --x64 --publish never",
+    "release": "npm run dist:win && npm run build:single && node scripts/make-release.mjs",
+    "e2e:release": "playwright test -c playwright.release.config.ts"
+  },
+  "devDependencies": {
+    "@dnd-kit/core": "^6.3.1",
+    "@dnd-kit/sortable": "^10.0.0",
+    "@dnd-kit/utilities": "^3.2.2",
+    "@fontsource-variable/inter": "^5.3.0",
+    "@fontsource-variable/space-grotesk": "^5.3.0",
+    "@playwright/test": "^1.65.0",
+    "@tailwindcss/vite": "^4.3.5",
+    "@testing-library/dom": "^10.4.2",
+    "@testing-library/react": "^16.3.3",
+    "@types/node": "^26.6.6",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "@vitejs/plugin-react": "^6.2.1",
+    "dexie": "^4.4.7",
+    "electron": "^45.2.3",
+    "electron-builder": "^26.18.0",
+    "fake-indexeddb": "^6.2.8",
+    "jsdom": "^31.0.0",
+    "lucide-react": "^1.70.0",
+    "react": "^19.3.1",
+    "react-dom": "^19.3.1",
+    "tailwindcss": "^4.3.5",
+    "typescript": "^5.9.3",
+    "vite": "^8.3.6",
+    "vite-plugin-pwa": "^2.0.0",
+    "vite-plugin-singlefile": "^2.3.4",
+    "vitest": "^5.1.0",
+    "workbox-window": "^7.4.1",
+    "zustand": "^5.1.0"
+  },
+  "build": {
+    "appId": "io.github.munkeymomo.orbit",
+    "productName": "ORBIT",
+    "copyright": "Copyright © 2026 Dr Mark Isaacs",
+    "directories": {
+      "output": "release",
+      "buildResources": "build"
+    },
+    "files": [
+      "dist/**/*",
+      "electron/**/*",
+      "package.json",
+      "!dist/**/*.map"
+    ],
+    "asar": true,
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        },
+        {
+          "target": "portable",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "icon": "build/icon.png"
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "ORBIT",
+      "artifactName": "ORBIT-Setup-${version}.exe",
+      "uninstallDisplayName": "ORBIT"
+    },
+    "portable": {
+      "artifactName": "ORBIT-${version}-Portable.exe"
+    }
+  }
+}

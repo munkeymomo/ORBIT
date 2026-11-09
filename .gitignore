@@ -1,0 +1,11 @@
+node_modules
+dist
+dist-single
+dev-dist
+release
+test-results
+playwright-report
+*.tsbuildinfo
+*.log
+.DS_Store
+Thumbs.db
