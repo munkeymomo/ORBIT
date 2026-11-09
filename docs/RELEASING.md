@@ -1,6 +1,6 @@
 # Releasing ORBIT
 
-Downloads live on SourceForge, the source on GitHub, and both carry the same files. The GitHub build makes and
+Downloads live on SourceForge ([orbit-productivity](https://sourceforge.net/projects/orbit-productivity/)), the source on GitHub, and both carry the same files. The GitHub build makes and
 publishes the release; SourceForge copies it.
 
 ## Cut a release

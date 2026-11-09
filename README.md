@@ -2,7 +2,7 @@
 
 A visual, local-first productivity workspace for people juggling several projects at once.
 
-Created by Dr Mark Isaacs · MIT licensed · ☕ [Buy me a coffee](https://ko-fi.com/markisaacschem)
+Created by Dr Mark Isaacs · MIT licensed · **[Download from SourceForge](https://sourceforge.net/projects/orbit-productivity/)** · ☕ [Buy me a coffee](https://ko-fi.com/markisaacschem)
 
 - **Universe** – a zoomable map of your work: groups are **galaxies**, projects are **star systems**, tasks are **planets** sized by effort, coloured by priority, glowing when overdue or due soon. Click a galaxy or star to fly in; Esc flies back out; `[` / `]` jump to the previous / next; breadcrumbs and a minimap jump anywhere. Projects without a galaxy drift in deep space. New galaxies wind outwards along a spiral from the centre (oldest in the middle); **New → Tidy galaxies into a spiral** puts them back in that order after you have moved them around (undoable). Drag a star to rearrange it, or drop it onto another galaxy (or deep space) to move the project there, tasks and all; the target lights up, the view pans when you drag near the edge, and Esc cancels. Stars can be dragged straight from the whole-universe view. Drag a galaxy's name to move the galaxy. Phones get a card view with large touch targets (desktop is the focus for now).
 - **Context Parking** – park a task with where you stopped, your next action, notes and links; the timer state is saved automatically. Switching tasks parks the current one for you.
@@ -24,7 +24,7 @@ Everything is stored **on this device only**. There is no account and no server.
 | `ORBIT-<version>.html` | Single file, opens in any modern browser (Chrome or Edge recommended) | That browser |
 | `dist/` on a web host | Installable web app (PWA), works offline | That browser |
 
-Download the latest from [GitHub releases](https://github.com/munkeymomo/ORBIT/releases/latest). The Windows builds are not code-signed yet, so SmartScreen may warn on first run: **More info → Run anyway**.
+Download the latest from [SourceForge](https://sourceforge.net/projects/orbit-productivity/) or [GitHub releases](https://github.com/munkeymomo/ORBIT/releases/latest). The Windows builds are not code-signed yet, so SmartScreen may warn on first run: **More info → Run anyway**.
 
 ## Build a release
 

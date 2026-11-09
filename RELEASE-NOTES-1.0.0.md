@@ -20,4 +20,6 @@ No account, no tracking. Your data stays on your computer; Settings → Back up 
 
 The Windows builds are not code-signed yet, so SmartScreen may say it "protected your PC". Choose **More info → Run anyway**. Checksums are in `SHA256SUMS.txt`.
 
+Download: https://sourceforge.net/projects/orbit-productivity/ · Source: https://github.com/munkeymomo/ORBIT
+
 Created by Dr Mark Isaacs. If ORBIT helps you start your day, you can [buy me a coffee](https://ko-fi.com/markisaacschem).

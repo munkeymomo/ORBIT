@@ -15,5 +15,8 @@ export const isFileCopy = typeof location !== 'undefined' && location.protocol =
 
 export const APP_VERSION = __APP_VERSION__;
 
+/** Where the Windows builds and new versions are published. */
+export const DOWNLOAD_URL = 'https://sourceforge.net/projects/orbit-productivity/';
+
 /** Mark's “buy me a coffee” page. */
 export const SUPPORT_URL = 'https://ko-fi.com/markisaacschem';

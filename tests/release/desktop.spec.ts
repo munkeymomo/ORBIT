@@ -50,5 +50,6 @@ test('desktop app: fixed origin, data kept between launches, links open outside,
   await page.getByRole('link', { name: 'Buy me a coffee' }).click();
   await expect.poll(() => app.evaluate(() => (globalThis as unknown as { opened: string[] }).opened)).toEqual(['https://ko-fi.com/markisaacschem']);
   expect(page.url()).toBe(before);
+  await expect(page.getByRole('link', { name: 'New versions' })).toHaveAttribute('href', 'https://sourceforge.net/projects/orbit-productivity/');
   await app.close();
 });

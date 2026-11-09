@@ -55,7 +55,7 @@ const readme = `${intro}
 | --- | --- | --- |
 ${parts.map(([, name, what]) => `| ${name} | ${what} | ${mb(name)} |`).join('\n')}
 
-Source: https://github.com/munkeymomo/ORBIT · Support: https://ko-fi.com/markisaacschem
+Downloads: https://sourceforge.net/projects/orbit-productivity/ · Source: https://github.com/munkeymomo/ORBIT · Support: https://ko-fi.com/markisaacschem
 `;
 fs.writeFileSync(path.join(out, 'README.md'), readme);
 

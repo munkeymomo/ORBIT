@@ -1,6 +1,6 @@
 import { useRef, useState, useSyncExternalStore } from 'react';
 import { Bell, Coffee, Copy, Download, FolderOpen, HardDrive, Info, Keyboard, MonitorSmartphone, Palette, Sparkles, Timer, Trash2, Upload, Volume2 } from 'lucide-react';
-import { APP_VERSION, SUPPORT_URL, desktop, isFileCopy } from '../../lib/desktop';
+import { APP_VERSION, DOWNLOAD_URL, SUPPORT_URL, desktop, isFileCopy } from '../../lib/desktop';
 import { useOrbit } from '../../store/store';
 import type { Prefs } from '../../types';
 import { createBackup, parseBackupText, type ValidationResult } from '../../lib/backup';
@@ -361,6 +361,7 @@ function InstallSection() {
         <p className="text-sm text-muted">
           Your data is kept by this browser, not in the file itself: open the file in the same browser each time, and use Back up above to keep a copy or move to another computer. Chrome and Edge work best.
         </p>
+        <DownloadLink />
       </Section>
     );
   }
@@ -377,7 +378,20 @@ function InstallSection() {
           Use your browser’s <strong className="font-medium text-text">Install app</strong> option (desktop Chrome or Edge: the icon in the address bar) or <strong className="font-medium text-text">Add to Home Screen</strong> (iOS Safari: Share menu). Installation needs ORBIT to be served from its own web address, not inside a preview frame.
         </p>
       )}
+      <DownloadLink />
     </Section>
+  );
+}
+
+function DownloadLink() {
+  return (
+    <p className="mt-3 text-sm text-muted">
+      Prefer a desktop app? ORBIT for Windows (installer or portable) is free on{' '}
+      <a href={DOWNLOAD_URL} target="_blank" rel="noopener noreferrer" className="font-medium text-accent-ink hover:underline">
+        SourceForge
+      </a>
+      ; your backup file restores straight into it.
+    </p>
   );
 }
 
@@ -397,6 +411,14 @@ function About() {
           className="inline-flex h-8 items-center gap-1.5 rounded-lg bg-amber-soft px-3 text-[13px] font-medium text-amber outline-none transition-[background,color] hover:bg-amber hover:text-[#2a1a00] focus-visible:ring-2 focus-visible:ring-accent"
         >
           <Coffee size={15} /> Buy me a coffee
+        </a>
+        <a
+          href={DOWNLOAD_URL}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-line bg-surface-2 px-3 text-[13px] font-medium text-text outline-none transition-[background,border] hover:border-line-strong hover:bg-surface-3 focus-visible:ring-2 focus-visible:ring-accent"
+        >
+          <Download size={15} /> New versions
         </a>
         <Button size="sm" variant="secondary" onClick={() => setHelpOpen(true)}>
           <Keyboard size={15} /> Keyboard shortcuts

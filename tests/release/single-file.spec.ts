@@ -22,6 +22,7 @@ test('single-file edition: opens from disk with nothing beside it, and keeps dat
     await page.keyboard.press('7');
     await expect(page.getByText('This copy of ORBIT runs straight from a file and works offline.')).toBeVisible();
     await expect(page.getByRole('link', { name: 'Buy me a coffee' })).toHaveAttribute('href', 'https://ko-fi.com/markisaacschem');
+    await expect(page.getByRole('link', { name: 'SourceForge' })).toHaveAttribute('href', 'https://sourceforge.net/projects/orbit-productivity/');
     expect(failed).toEqual([]);
   } finally {
     await ctx.close();
