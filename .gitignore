@@ -1,8 +1,8 @@
 node_modules
-dist
-dist-single
-dev-dist
-release
+/dist
+/dist-single
+/dev-dist
+/release
 test-results
 playwright-report
 *.tsbuildinfo
