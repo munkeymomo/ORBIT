@@ -84,6 +84,10 @@ interface SpeechRecognitionLike {
   stop: () => void;
 }
 
+/** The modifier key as people know it on this computer: ⌘ on Apple devices, Ctrl elsewhere. */
+export const MOD_KEY =
+  typeof navigator !== 'undefined' && /Mac|iPhone|iPad|iPod/i.test(navigator.platform || navigator.userAgent) ? '⌘' : 'Ctrl';
+
 export function voiceSupported(): boolean {
   // Electron exposes the API but has no speech service behind it.
   if (typeof window === 'undefined' || isDesktop) return false;

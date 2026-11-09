@@ -1,3 +1,4 @@
+import { MOD_KEY } from '../../lib/platform';
 import { Coffee } from 'lucide-react';
 import { APP_VERSION, SUPPORT_URL } from '../../lib/desktop';
 import { useOrbit } from '../../store/store';
@@ -9,7 +10,7 @@ const GROUPS: { title: string; rows: [string[], string][] }[] = [
     rows: [
       [['C'], 'Capture a task or thought'],
       [['/'], 'Search'],
-      [['⌘', 'K'], 'Search'],
+      [[MOD_KEY, 'K'], 'Search'],
       [['1', '–', '7'], 'Switch view'],
       [['?'], 'This help'],
       [['Esc'], 'Close panel or dialog'],
@@ -23,7 +24,7 @@ const GROUPS: { title: string; rows: [string[], string][] }[] = [
       [['R'], 'Resume the most recently parked task'],
       [['X'], 'Complete the active task'],
       [['F'], 'Open Focus'],
-      [['⌘', 'Enter'], 'Park immediately (in the park sheet)'],
+      [[MOD_KEY, 'Enter'], 'Park immediately (in the park sheet)'],
     ],
   },
   {

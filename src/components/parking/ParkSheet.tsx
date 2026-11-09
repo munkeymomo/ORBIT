@@ -1,3 +1,4 @@
+import { MOD_KEY } from '../../lib/platform';
 import { useEffect, useRef, useState } from 'react';
 import { ChevronDown, SquareParking } from 'lucide-react';
 import { useOrbit } from '../../store/store';
@@ -70,7 +71,7 @@ function Sheet({ taskId, checkpointId }: { taskId: string; checkpointId?: string
       footer={
         <>
           <span className="mr-auto hidden items-center gap-1 text-xs text-faint sm:flex">
-            <Kbd>⌘</Kbd>
+            <Kbd>{MOD_KEY}</Kbd>
             <Kbd>Enter</Kbd> to {editing ? 'save' : 'park'}
           </span>
           {!editing && (
