@@ -1,6 +1,7 @@
 // Gathers a finished release into release/sourceforge/<version>/, ready to upload as one folder:
 // the Windows installer, the portable exe, the single-file browser edition, a README and checksums.
 // Run through `npm run release`, which builds everything first.
+import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -22,45 +23,41 @@ if (missing.length) {
 fs.rmSync(out, { recursive: true, force: true });
 fs.mkdirSync(out, { recursive: true });
 
+// The source, exactly as committed (not the working tree), when this is a git checkout.
+let hasSource = false;
+try {
+  execFileSync('git', ['archive', '--format=zip', `--prefix=orbit-${v}/`, '-o', path.join(out, `ORBIT-${v}-src.zip`), 'HEAD'], { stdio: 'pipe' });
+  parts.push([path.join(out, `ORBIT-${v}-src.zip`), `ORBIT-${v}-src.zip`, 'Source code, MIT licensed']);
+  hasSource = true;
+} catch {
+  console.warn('Not a git checkout: no source zip in this release.');
+}
+
 const sums = [];
 for (const [from, name] of parts) {
   const target = path.join(out, name);
-  fs.copyFileSync(from, target);
+  if (path.resolve(from) !== path.resolve(target)) fs.copyFileSync(from, target);
   sums.push(`${createHash('sha256').update(fs.readFileSync(target)).digest('hex')}  ${name}`);
 }
 fs.writeFileSync(path.join(out, 'SHA256SUMS.txt'), sums.join('\n') + '\n');
 
 const mb = (f) => `${(fs.statSync(path.join(out, f)).size / 1048576).toFixed(1)} MB`;
-const readme = `# ORBIT ${v}
+// SourceForge shows README.md under the file list: the release notes, then the files and how to choose.
+const notesFile = `RELEASE-NOTES-${v}.md`;
+const intro = fs.existsSync(notesFile)
+  ? fs.readFileSync(notesFile, 'utf8').trim()
+  : `# ORBIT ${v}\n\nA visual, local-first productivity workspace. Created by Dr Mark Isaacs. Free and MIT licensed.`;
+const readme = `${intro}
 
-A visual, local-first productivity workspace: your projects as a universe of galaxies and star systems,
-context parking so you never lose your place, a focus timer that never forces you to stop, and a day board.
-No account, no tracking, no AI service. Your data stays on your computer.
-
-Created by Dr Mark Isaacs. Free and MIT licensed.
-
-## Downloads
+## Files in this folder
 
 | File | What it is | Size |
 | --- | --- | --- |
 ${parts.map(([, name, what]) => `| ${name} | ${what} | ${mb(name)} |`).join('\n')}
 
-**Which one?** The installer adds ORBIT to the Start menu and desktop. The portable exe runs from anywhere
-(it unpacks itself each time, so it starts a few seconds slower). Both keep your data in
-\`%APPDATA%\\ORBIT\`, so you can switch between them. The HTML file opens in your browser and keeps its data
-in that browser.
-
-**Windows SmartScreen:** these builds are not code-signed yet, so Windows may say it "protected your PC".
-Choose **More info → Run anyway**. Checksums are in SHA256SUMS.txt.
-
-**Moving your data:** Settings → Back up downloads everything as one JSON file; Restore loads it anywhere,
-including between the desktop app and the browser editions.
-
-## Support
-
-If ORBIT helps you start your day, you can buy me a coffee: https://ko-fi.com/markisaacschem
+Source: https://github.com/munkeymomo/ORBIT · Support: https://ko-fi.com/markisaacschem
 `;
 fs.writeFileSync(path.join(out, 'README.md'), readme);
 
-console.log(`Release ${v} ready in ${out}:`);
+console.log(`Release ${v} ready in ${out}${hasSource ? '' : ' (no source zip)'}:`);
 for (const f of fs.readdirSync(out)) console.log(`  ${f.padEnd(28)} ${mb(f)}`);

@@ -24,7 +24,7 @@ Everything is stored **on this device only**. There is no account and no server.
 | `ORBIT-<version>.html` | Single file, opens in any modern browser (Chrome or Edge recommended) | That browser |
 | `dist/` on a web host | Installable web app (PWA), works offline | That browser |
 
-The Windows builds are not code-signed yet, so SmartScreen may warn on first run: **More info → Run anyway**.
+Download the latest from [GitHub releases](https://github.com/munkeymomo/ORBIT/releases/latest). The Windows builds are not code-signed yet, so SmartScreen may warn on first run: **More info → Run anyway**.
 
 ## Build a release
 
@@ -32,10 +32,10 @@ On Windows (the desktop builds need Windows for the icon and installer):
 
 ```bash
 npm install
-npm run release    # → release/sourceforge/<version>/: installer, portable exe, single-file HTML, README, SHA256SUMS
+npm run release    # → release/sourceforge/<version>/: installer, portable exe, single-file HTML, source zip, README, SHA256SUMS
 ```
 
-That runs `dist:win` (web build + electron-builder: NSIS installer and portable exe), `build:single` (one self-contained HTML file via vite-plugin-singlefile) and `scripts/make-release.mjs`, which gathers the files and writes checksums. Upload the whole `release/sourceforge/<version>` folder. `npm run desktop` runs the desktop app from the current build without packaging it.
+That runs `dist:win` (web build + electron-builder: NSIS installer and portable exe), `build:single` (one self-contained HTML file via vite-plugin-singlefile) and `scripts/make-release.mjs`, which gathers the files, the source zip and the release notes, and writes checksums. Published releases are built by GitHub Actions and copied to SourceForge: see [`docs/RELEASING.md`](docs/RELEASING.md). `npm run desktop` runs the desktop app from the current build without packaging it.
 
 The desktop app (`electron/`) serves the same `dist/` build from a fixed `orbit://app` origin, so its IndexedDB data survives updates; it skips the service worker, opens links in the default browser, remembers its window, allows one instance at a time, and only grants the notification, clipboard and fullscreen permissions. Ctrl+Shift+I opens developer tools.
 
