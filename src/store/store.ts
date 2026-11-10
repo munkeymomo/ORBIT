@@ -26,7 +26,7 @@ import type {
   ViewName,
 } from '../types';
 import { emptySnapshot, MemoryAdapter, type StorageAdapter } from '../data/storage';
-import { DEFAULT_PREFS } from '../data/normalise';
+import { DEFAULT_PREFS, normaliseHostedSnapshot } from '../data/normalise';
 import * as T from '../lib/timer';
 import { uid, toDateKey } from '../lib/util';
 import { nextUnusedColor } from '../lib/colors';
@@ -883,6 +883,8 @@ export function createOrbitStore(deps: StoreDeps = {}): StoreApi<OrbitState> {
         // working state when it keeps work); host records come from the verse, with working state laid over.
         const info = hosted.info;
         const ab = abilities(info);
+        // a host's store can hold rows from anywhere: fill defaults, leave out what cannot be used
+        snap = normaliseHostedSnapshot(snap);
         const keep = <K extends keyof Snapshot>(k: K, when: boolean) => (when ? snap[k] : emptySnapshot()[k]);
         const start = startVerse(info);
         const verseId = workVerseOf(info);
@@ -1787,7 +1789,7 @@ export function createOrbitStore(deps: StoreDeps = {}): StoreApi<OrbitState> {
           // Only ORBIT's own records and working state are replaced (with the host, which keeps them); the host's
           // records are never part of it. Without personal records there is nothing of ORBIT's to restore.
           if (!can().personal) throw new Error(refusal.data(can()));
-          const clean = personalOnly(snap, get().hostTaskIds(), new Set([...get().groups, ...get().projects].filter((r) => r.host).map((r) => r.id)));
+          const clean = personalOnly(normaliseHostedSnapshot(snap), get().hostTaskIds(), new Set([...get().groups, ...get().projects].filter((r) => r.host).map((r) => r.id)));
           await adapter.replaceAll(clean); // atomic on the host's side; throws on failure and nothing changes
           await reloadHosted(clean);
           return;

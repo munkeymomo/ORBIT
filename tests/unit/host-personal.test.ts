@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import Ajv2020 from 'ajv/dist/2020';
 import schemaText from '../../src/host/host-protocol-v1.schema.json?raw';
 import { createFakeHost, type FakeHost } from '../../src/host/fakeHost';
@@ -437,5 +437,63 @@ describe('Move to <host>… (adopt)', () => {
     await h.settle();
     expect(JSON.stringify(await h.saved())).toBe(before);
     expect(h.toasts()).toMatch(/took none of the tasks/);
+  });
+});
+
+describe('hosted loads are normalised', () => {
+  const broken = (): Snapshot => {
+    const b = { ...emptySnapshot() } as unknown as Record<string, unknown>;
+    b.groups = [{ id: 'pg1', name: 'Bare galaxy' }, { name: 'no id' }, null];
+    b.projects = [{ id: 'pp1', groupId: 'pg1', name: 'Bare system' }, { id: 7 }];
+    b.tasks = [
+      { id: 'pt1', projectId: 'pp1', title: 'Bare task' },
+      { id: 'pt2', projectId: 'nowhere', title: 'Orphan' },
+      { projectId: 'pp1', title: 'No id' },
+    ];
+    b.checkpoints = [{ id: 'pc1', taskId: 'pt1' }, { id: 'pc2' , taskId: 'pt1', links: 'x' }];
+    b.sessions = [{ id: 'ps1' }, 'junk'];
+    b.captures = [{ id: 'pk1', text: 'idea' }];
+    b.dayItems = [{ id: 'pd1', taskId: 'pt1', date: TODAY }, { id: 'pd2', taskId: 'pt1', date: 'not a date' }];
+    b.placements = [{ id: 'g|g-1', x: 'a' }];
+    b.taskWork = [{ id: 't-1', dependsOn: 'x', subtasks: [1, { id: 's', title: 'ok', done: false }] }, { parked: true }];
+    return b as unknown as Snapshot;
+  };
+
+  it('fills defaults, drops unusable rows with one warning, never crashes', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const h = await personal({ store: broken() });
+    expect(warn).toHaveBeenCalledTimes(1);
+    warn.mockRestore();
+    const t = h.s().tasks.find((x) => x.id === 'pt1')!;
+    expect(t.dependsOn).toEqual([]);
+    expect(t.subtasks).toEqual([]);
+    expect(t.links).toEqual([]);
+    expect(h.s().tasks.some((x) => x.id === 'pt2')).toBe(false);
+    expect(h.s().tasks.filter((x) => !x.host)).toHaveLength(1);
+    const g = h.s().groups.find((x) => x.id === 'pg1')!;
+    expect([g.x, g.y]).toEqual([0, 0]);
+    const p = h.s().projects.find((x) => x.id === 'pp1')!;
+    expect(typeof p.color).toBe('string');
+    expect(typeof p.x).toBe('number');
+    expect(h.s().checkpoints.map((c) => c.id).sort()).toEqual(['pc1', 'pc2']);
+    expect(h.s().checkpoints.every((c) => Array.isArray(c.links))).toBe(true);
+    expect(h.s().sessions.map((x) => x.id)).toEqual(['ps1']);
+    expect(h.s().dayItems.map((x) => x.id)).toEqual(['pd1']);
+    expect(h.s().placements[0].x).toBe(0);
+    const w = h.s().taskWork;
+    expect(w).toHaveLength(1);
+    expect(w[0].dependsOn).toBeUndefined();
+    expect(w[0].subtasks).toHaveLength(1);
+  });
+
+  it('normalises on a hosted restore as well', async () => {
+    const h = await personal();
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    await h.s().restore(broken());
+    warn.mockRestore();
+    expect(h.s().tasks.find((x) => x.id === 'pt1')!.dependsOn).toEqual([]);
+    expect(h.s().tasks.some((x) => x.id === 'pt2')).toBe(false);
+    const saved = await h.saved();
+    expect(saved.groups.every((g) => typeof g.x === 'number')).toBe(true);
   });
 });
