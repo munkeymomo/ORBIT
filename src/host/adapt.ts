@@ -310,7 +310,8 @@ export function adaptVerse(v: Verse, placements: Placement[], opts: AdaptOptions
     createdAt: i + 1,
     updatedAt: 0,
     name: s.name,
-    color: colorFor(s.id, s.color),
+    // a portal is violet unless the host says otherwise
+    color: colorFor(s.id, s.color ?? (s.portal ? 'violet' : undefined)),
     icon: 'orbit',
     description: s.note ?? '',
     groupId: holderOf(s) === DEEP_SPACE ? null : s.galaxy,

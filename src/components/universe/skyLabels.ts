@@ -12,6 +12,8 @@ import { daysBetween } from '../../lib/util';
 /** Planet names: 11.5px; a star's name: 13px or 15px, semibold; date labels: 11px, semibold. */
 export const STAR_NAME_W = 220;
 export const PLANET_LABEL_W = 150;
+/** From this zoom an item's name is followed by its `sub`. */
+export const ITEM_SUB_ZOOM = 1.05;
 
 export function beaconText(b: Beacon, today: string, full: boolean): string {
   const when =
@@ -31,11 +33,18 @@ export function starNameRect(s: SystemPlace, sx: number, sy: number, k: number, 
   const rs = starRadius(s, k);
   const scale = (rs >= 30 ? 15 : 13) / 11.5;
   const lines = wrapLabel(s.pv.project.name, STAR_NAME_W, (t) => measure(t) * scale * 1.06, 2);
-  const st = s.pv.stats;
-  const meta = `${s.pv.project.host?.code ? `${s.pv.project.host.code} · ` : ''}${st.open} open · ${Math.round(st.progress * 100)}%${st.parked ? ` · ${st.parked} parked` : ''}${st.overdue ? ` · ${st.overdue} overdue` : ''}`;
+  const meta = `${s.pv.project.host?.code ? `${s.pv.project.host.code} · ` : ''}${starSummary(s.pv)}`;
   const w = Math.min(STAR_NAME_W, Math.max(measure(meta), ...lines.map((l) => measure(l) * scale * 1.06)) + 20);
   const h = lines.length * (rs >= 30 ? 19 : 17) + 21;
   return { x: sx - w / 2, y: sy + rs + 6 + 8, w, h };
+}
+
+/** The one-line summary under a star, as StarNode words it: TASK counts, and "n items" for a system that holds items. */
+export function starSummary(pv: SystemPlace['pv']): string {
+  const st = pv.stats;
+  const items = pv.itemCount ?? 0;
+  if (st.total === 0) return items ? `${items} item${items === 1 ? '' : 's'}` : 'No tasks yet';
+  return `${st.open} open${st.parked ? ` · ${st.parked} parked` : ''}${items ? ` · ${items} items` : ''} · ${Math.round(st.progress * 100)}%${st.overdue ? ` · ${st.overdue} overdue` : ''}`;
 }
 
 export interface SkyLabels {
@@ -50,6 +59,7 @@ export function layoutSky(p: {
   view: View;
   size: Size;
   universeLevel: boolean;
+  /** The selected planet (a task or an item): its name is always placed. */
   selectedTask: string | null;
   today: string;
   beacons: boolean;
@@ -119,6 +129,24 @@ export function layoutSky(p: {
             force: t.id === p.selectedTask,
           },
         ];
+      });
+      const nt = s.pv.tasks.length;
+      (s.pv.items ?? []).forEach((iv, j) => {
+        const sl = s.slots[nt + j];
+        if (!sl) return;
+        const d = clamp(sl.d * k, 14, 64);
+        const it = iv.item;
+        items.push({
+          id: it.id,
+          x: sx + sl.x * k,
+          y: sy + sl.y * k,
+          r: d / 2 + 5,
+          // its `sub` too, close up
+          text: it.sub && k >= ITEM_SUB_ZOOM ? `${it.title} · ${it.sub}` : it.title,
+          // the live and big first; ghosts and the gone last
+          rank: (it.state === 'live' ? 10 : 2) + (it.ghost ? -6 : 0) + Math.round(sl.d / 15),
+          force: it.id === p.selectedTask,
+        });
       });
       const laid = placeOrbitLabels(items, { cx: sx, cy: sy, measure, maxW: PLANET_LABEL_W, blocked, bounds });
       // close up every name that fits is shown; a little further out only the selected one (the rest on hover)

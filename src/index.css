@@ -169,6 +169,11 @@ body {
 .anim-pop { animation: orbit-pop 0.18s ease-out both; }
 .anim-pulse { animation: orbit-pulse 1.8s ease-in-out infinite; }
 .anim-breathe { animation: orbit-breathe 4s ease-in-out infinite; }
+/* a portal turns slowly (and not at all with reduced motion) */
+@keyframes orbit-swirl {
+  to { transform: rotate(-360deg); }
+}
+.portal-swirl { animation: orbit-swirl 24s linear infinite; transform-origin: 50% 50%; }
 
 [data-motion='reduce'] *,
 [data-motion='reduce'] *::before,

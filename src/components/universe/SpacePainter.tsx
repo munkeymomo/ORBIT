@@ -6,6 +6,7 @@ import type { Beacon, Cluster, Family } from '../../host/types';
 import type { MoonSet } from '../../host/adapt';
 import type { Prefs } from '../../types';
 import type { LabelSide, OrbitLabel } from './labels';
+import { curveMid, type ArrowCurve } from './arrows';
 
 /** Fixed space palette: the Universe is always night sky, in either app theme. */
 const SPACE = {
@@ -44,7 +45,16 @@ export function SpacePainter({
   layers = { moons: true, belts: true, beacons: true },
   planetLabels,
   crowded,
+  arrows = [],
+  arrowFocus,
+  galaxyBoxes,
 }: {
+  /** Where each galaxy's words are at universe level (a cluster's outline goes round them). */
+  galaxyBoxes?: Map<string, { x: number; y: number; w: number; h: number }>;
+  /** A verse's relations between planets ("made from"), as curves on screen. Never dependencies. */
+  arrows?: ArrowCurve[];
+  /** Planets selected or hovered: the labels of their arrows are shown. */
+  arrowFocus?: Set<string>;
   /** Where each planet's name is (moons go on the other side). */
   planetLabels?: Map<string, OrbitLabel>;
   /** Galaxies and systems whose dates are too close together to label one by one. */
@@ -134,7 +144,7 @@ export function SpacePainter({
     const toS = (wx: number, wy: number) => [wx * k + view.x, wy * k + view.y] as const;
 
     /* clusters: faint constellation lines between galaxies that belong together, and the cluster's name */
-    if (universeLevel && clusters.length) drawClusters(g, clusters, galaxies, toS, k);
+    if (universeLevel && clusters.length) drawClusters(g, clusters, galaxies, toS, k, galaxyBoxes);
 
     /* galaxies */
     for (const gx of galaxies) {
@@ -235,6 +245,16 @@ export function SpacePainter({
         const sDim = dim && !s.pv.matches && s.pv.project.id !== draggingId ? 0.3 : 1;
 
         if (k < LOD.systems || universeLevel) {
+          if (s.portal) {
+            // a portal from afar: a small violet ring
+            const pr = clamp(s.pv.radius * k * 0.55, 2, 7);
+            g.strokeStyle = rgba(PORTAL, 0.85 * sDim);
+            g.lineWidth = 1.4;
+            g.beginPath();
+            g.arc(sx, sy, pr * 1.6, 0, Math.PI * 2);
+            g.stroke();
+            continue;
+          }
           // a point of light, brighter with more open work
           const pr = clamp(s.pv.radius * k * 0.55, 1.6, 7);
           const glow = g.createRadialGradient(sx, sy, 0, sx, sy, pr * 4);
@@ -268,7 +288,7 @@ export function SpacePainter({
           }
           g.setLineDash([]);
 
-          if (s.busy) drawBusyRing(g, s, sx, sy, k, hex, today, Math.max(orbitA, 0.7) * sDim, k >= LOD.planets);
+          if (s.busy) drawBusyRing(g, s, sx, sy, k, hex, today, Math.max(orbitA, 0.7) * sDim, k >= LOD.planets, families);
 
           // planet dots while planets are too small to interact with
           if (k < LOD.planets) {
@@ -284,6 +304,24 @@ export function SpacePainter({
               g.beginPath();
               g.arc(px, py, Math.max(1.4, (sl.d / 2) * k), 0, Math.PI * 2);
               g.fill();
+            });
+            const nt = s.pv.tasks.length;
+            (s.pv.items ?? []).forEach((iv, j) => {
+              const sl = s.slots[nt + j];
+              if (!sl) return;
+              const col = famColor(families, iv.item.family);
+              const r = Math.max(1.4, (sl.d / 2) * k);
+              g.globalAlpha = (iv.item.ghost ? 0.35 : iv.item.state === 'live' ? 0.85 : 0.6) * orbitA * sDim;
+              g.beginPath();
+              g.arc(sx + sl.x * k, sy + sl.y * k, r, 0, Math.PI * 2);
+              if (iv.item.state === 'live' && !iv.item.ghost) {
+                g.fillStyle = col;
+                g.fill();
+              } else {
+                g.strokeStyle = col;
+                g.lineWidth = 1;
+                g.stroke();
+              }
             });
             g.globalAlpha = 1;
           }
@@ -313,6 +351,15 @@ export function SpacePainter({
             // the arc sits away from the planet's name; with no name shown, on the side facing the star
             const away = lab?.shown ? AWAY[lab.side] : Math.atan2(-sl.y, -sl.x);
             drawMoons(g, tv.moons, families, sx + sl.x * k, sy + sl.y * k, d, k, away, (dim && !tv.matches ? 0.3 : 1) * sDim);
+          });
+          const nt = s.pv.tasks.length;
+          (s.pv.items ?? []).forEach((iv, j) => {
+            const sl = s.slots[nt + j];
+            if (!sl || s.busy || (!iv.item.moons.items.length && !iv.item.moons.more)) return;
+            const d = clamp(sl.d * k, 14, 64);
+            const lab = planetLabels?.get(iv.item.id);
+            const away = lab?.shown ? AWAY[lab.side] : Math.atan2(-sl.y, -sl.x);
+            drawMoons(g, iv.item.moons, families, sx + sl.x * k, sy + sl.y * k, d, k, away, (dim && !iv.matches ? 0.3 : 1) * sDim * (iv.item.ghost ? 0.5 : 1));
           });
         }
       }
@@ -360,20 +407,64 @@ export function SpacePainter({
       g.setLineDash([]);
     }
 
+    /* a verse's relations between planets ("made from"): thin solid curves, never the dashes of dependencies */
+    if (arrows.length && k >= LOD.planets) drawArrows(g, arrows, arrowFocus);
+
     // soft vignette
     const vg = g.createRadialGradient(w / 2, h / 2, Math.min(w, h) * 0.35, w / 2, h / 2, Math.max(w, h) * 0.75);
     vg.addColorStop(0, 'rgba(0,0,0,0)');
     vg.addColorStop(1, 'rgba(0,0,0,0.45)');
     g.fillStyle = vg;
     g.fillRect(0, 0, w, h);
-  }, [view, size, galaxies, dim, today, showDeps, universeLevel, dropTarget, draggingId, families, clusters, layers, planetLabels, crowded]);
+  }, [view, size, galaxies, dim, today, showDeps, universeLevel, dropTarget, draggingId, families, clusters, layers, planetLabels, crowded, arrows, arrowFocus]);
 
-  return <canvas ref={ref} className="pointer-events-none absolute inset-0 h-full w-full" aria-hidden />;
+  return <canvas ref={ref} data-sky className="pointer-events-none absolute inset-0 h-full w-full" aria-hidden />;
 }
 
 /* ---------------- what a host adds ---------------- */
 
 const FONT = 'Inter Variable, system-ui, sans-serif';
+/** Portals (systems that lead to another verse), and the arrows of relations. */
+export const PORTAL = '#b18cff';
+const ARROW = '#8fd8ff';
+
+/** Relations between planets: a thin curve with an open chevron at its end; its label when an end is in focus. */
+function drawArrows(g: CanvasRenderingContext2D, arrows: ArrowCurve[], focus?: Set<string>) {
+  g.save();
+  g.setLineDash([]);
+  for (const c of arrows) {
+    const on = !!focus && (focus.has(c.from) || focus.has(c.to));
+    g.strokeStyle = rgba(ARROW, on ? 0.95 : 0.5);
+    g.lineWidth = on ? 1.8 : 1.2;
+    g.beginPath();
+    g.moveTo(c.ax, c.ay);
+    g.quadraticCurveTo(c.cx, c.cy, c.bx, c.by);
+    g.stroke();
+    // an open chevron along the curve's end direction
+    const a = Math.atan2(c.by - c.cy, c.bx - c.cx);
+    g.beginPath();
+    g.moveTo(c.bx - Math.cos(a - 0.5) * 8, c.by - Math.sin(a - 0.5) * 8);
+    g.lineTo(c.bx, c.by);
+    g.lineTo(c.bx - Math.cos(a + 0.5) * 8, c.by - Math.sin(a + 0.5) * 8);
+    g.stroke();
+  }
+  g.restore();
+  for (const c of arrows) {
+    if (!c.label || !focus || !(focus.has(c.from) || focus.has(c.to))) continue;
+    const m = curveMid(c);
+    g.save();
+    g.font = `600 11px ${FONT}`;
+    const w = g.measureText(c.label).width + 12;
+    g.fillStyle = 'rgba(8,12,24,0.9)';
+    g.strokeStyle = rgba(ARROW, 0.6);
+    g.lineWidth = 1;
+    roundRect(g, m.x - w / 2, m.y - 9, w, 18, 9);
+    g.fill();
+    g.stroke();
+    g.restore();
+    text(g, c.label, m.x, m.y, { color: '#d6f1ff', size: 11, weight: 600, align: 'center' });
+  }
+}
 const famColor = (families: Record<string, Family>, id: string) => families[id]?.color ?? '#c9d2ee';
 const famLabel = (families: Record<string, Family>, id: string) => families[id]?.label ?? id;
 
@@ -417,14 +508,17 @@ function drawSurveyRing(g: CanvasRenderingContext2D, cx: number, cy: number, sr:
  * Galaxies that belong together (a cluster): one faint outline around all of them and their names, with the
  * cluster's name on the outline at the top, so it reads as "these belong together" and not as one galaxy's label.
  */
-function drawClusters(g: CanvasRenderingContext2D, clusters: Cluster[], galaxies: GalaxyPlace[], toS: (x: number, y: number) => readonly [number, number], k: number) {
+function drawClusters(g: CanvasRenderingContext2D, clusters: Cluster[], galaxies: GalaxyPlace[], toS: (x: number, y: number) => readonly [number, number], k: number, boxes?: Map<string, { x: number; y: number; w: number; h: number }>) {
   // every galaxy's name and counts: a cluster's name goes where it covers none of them
   g.save();
   g.font = `600 15px ${FONT}`;
-  const labelBoxes = galaxies.map((gx) => {
+  const boxOf = (gx: GalaxyPlace) => {
+    const known = boxes?.get(gx.id);
+    if (known) return known;
     const [cx, cy] = toS(gx.x, gx.y);
     return universeLabelBox(cx, cy, gx.r * k, g.measureText(gx.name.toUpperCase()).width * 1.15 + 24);
-  });
+  };
+  const labelBoxes = galaxies.map(boxOf);
   g.restore();
   const taken: { x: number; y: number; w: number; h: number }[] = [];
   for (const c of clusters) {
@@ -436,7 +530,7 @@ function drawClusters(g: CanvasRenderingContext2D, clusters: Cluster[], galaxies
     for (const m of members) {
       const [cx, cy] = toS(m.x, m.y);
       const sr = m.r * k;
-      const lab = universeLabelBox(cx, cy, sr, g.measureText(m.name.toUpperCase()).width * 1.15 + 24);
+      const lab = boxOf(m);
       pts.push(...clusterOutlinePoints(cx, cy, sr * 1.12 + 10, lab));
     }
     const hull = convexHull(pts);
@@ -620,10 +714,25 @@ function drawMoons(g: CanvasRenderingContext2D, set: MoonSet, families: Record<s
   });
   g.restore();
   if (extra > 0) {
-    const a = start + shown.length * step + step * 0.4;
-    const x = px + Math.cos(a) * (orbit + 2);
-    const y = py + Math.sin(a) * (orbit + 2);
-    text(g, `+${extra}`, x, y, { color: '#c9d2ee', size: 10, weight: 600, align: Math.cos(a) < -0.2 ? 'right' : 'left', alpha });
+    // "+n": on a dark pill so it reads over stars, dust and orbits
+    const a = start + shown.length * step + step * 0.55;
+    const label = `+${extra}`;
+    g.save();
+    g.font = `700 12px ${FONT}`;
+    const w = g.measureText(label).width + 10;
+    g.restore();
+    const cx = px + Math.cos(a) * (orbit + 4 + w / 2);
+    const cy = py + Math.sin(a) * (orbit + 4 + 8);
+    g.save();
+    g.globalAlpha = alpha;
+    g.fillStyle = 'rgba(8,10,20,0.88)';
+    g.strokeStyle = 'rgba(201,210,238,0.55)';
+    g.lineWidth = 1;
+    roundRect(g, cx - w / 2, cy - 8.5, w, 17, 8.5);
+    g.fill();
+    g.stroke();
+    g.restore();
+    text(g, label, cx, cy + 0.5, { color: '#eef2ff', size: 12, weight: 700, align: 'center', alpha });
   }
 }
 
@@ -729,8 +838,33 @@ function drawBelt(g: CanvasRenderingContext2D, s: SystemPlace, families: Record<
 }
 
 /** A system with too many open tasks to draw: a ring of small dots, one per task, and the count. */
-function drawBusyRing(g: CanvasRenderingContext2D, s: SystemPlace, sx: number, sy: number, k: number, hex: string, today: string, alpha: number, detail: boolean) {
+function drawBusyRing(g: CanvasRenderingContext2D, s: SystemPlace, sx: number, sy: number, k: number, hex: string, today: string, alpha: number, detail: boolean, families: Record<string, Family> = {}) {
   const R = s.rings[0] * k;
+  if (s.busyItems) {
+    // items: one dot each, in its family's colour; hollow when archived or gone
+    const items = s.pv.items;
+    const n = Math.max(items.length, 1);
+    const dot = clamp(2.2 * Math.sqrt(k) * 1.4, 1.4, 3.4);
+    g.save();
+    items.forEach((iv, i) => {
+      const a = -Math.PI / 2 + (i / n) * Math.PI * 2;
+      const col = famColor(families, iv.item.family);
+      g.globalAlpha = alpha * (iv.matches ? 0.9 : 0.3);
+      g.beginPath();
+      g.arc(sx + Math.cos(a) * R, sy + Math.sin(a) * R, dot, 0, Math.PI * 2);
+      if (iv.item.state === 'live') {
+        g.fillStyle = col;
+        g.fill();
+      } else {
+        g.strokeStyle = col;
+        g.lineWidth = 1;
+        g.stroke();
+      }
+    });
+    g.restore();
+    if (detail) text(g, `${s.pv.itemCount} items · too many to draw one by one · listed in its panel`, sx, sy + R + 18, { color: '#c9d2ee', size: 11.5, weight: 600, align: 'center', alpha });
+    return;
+  }
   const open = s.pv.tasks.filter((t) => t.task.status !== 'done');
   const n = Math.max(open.length, 1);
   const dot = clamp(2.2 * Math.sqrt(k) * 1.4, 1.4, 3.4);

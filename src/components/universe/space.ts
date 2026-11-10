@@ -44,7 +44,7 @@ export interface Slot {
 export const CLUTTER = {
   /** Moons drawn on one planet before the rest are counted as "+n". */
   moons: 5,
-  /** Open tasks in one system above which they are drawn as a ring of dots with a count. */
+  /** Open tasks (or items) in one system above which they are drawn as a ring of dots with a count. */
   tasks: 40,
   /** Belt items above which a belt is drawn as a ring of haze with a count. */
   belt: 60,
@@ -71,8 +71,12 @@ export interface SystemPlace {
   slots: Slot[];
   /** Radius that contains the whole system including labels. */
   extent: number;
-  /** Too many open tasks to draw one by one: they are a ring of dots with a count. */
+  /** Too many open tasks (or items) to draw one by one: they are a ring of dots with a count. */
   busy: boolean;
+  /** Busy because of its items (they are the dots). */
+  busyItems: boolean;
+  /** A system that leads to another verse: drawn as a portal. */
+  portal?: { verse: string; label?: string };
   /** The system's belt (what it holds that no planet uses), at radius r (world units). */
   belt: { r: number; collection: Collection; haze: boolean } | null;
   /** Beacons drawn beside the system. */
@@ -97,6 +101,8 @@ export interface GalaxyPlace {
   total: number;
   parked: number;
   overdue: number;
+  /** Items its systems stand for (never counted as tasks). */
+  items: number;
   matches: boolean;
   hasActive: boolean;
   /** Beacons on the galaxy's rim. */
@@ -146,7 +152,8 @@ export function buildSpace(
     const systems: SystemPlace[] = members.map((pv) => {
       const rel = drag?.kind === 'system' && dragged(pv) ? { x: drag.wx - c.x, y: drag.wy - c.y } : { x: pv.project.x, y: pv.project.y };
       const host = pv.project.host;
-      const busy = !!host && pv.stats.open > CLUTTER.tasks;
+      const busyItems = !!host && (pv.items?.length ?? 0) > CLUTTER.tasks;
+      const busy = (!!host && pv.stats.open > CLUTTER.tasks) || busyItems;
       const laid = busy ? { rings: [pv.radius + 86], slots: [] } : orbitLayout(pv, pv.canAdd);
       const { rings, slots } = laid;
       const outer = rings.at(-1) ?? pv.radius + 50;
@@ -157,7 +164,7 @@ export function buildSpace(
       let extent = systemExtent(rings, pv.radius);
       if (belt) extent = Math.max(extent, belt.r + 60);
       if (beacons.length) extent = Math.max(extent, beaconR + 24);
-      return { pv, galaxyId: id, x: c.x + rel.x, y: c.y + rel.y, rx: rel.x, ry: rel.y, rings, slots, extent, busy, belt, beacons, beaconR, host };
+      return { pv, galaxyId: id, x: c.x + rel.x, y: c.y + rel.y, rx: rel.x, ry: rel.y, rings, slots, extent, busy, busyItems, portal: host?.portal, belt, beacons, beaconR, host };
     });
     // A star being dragged does not stretch its galaxy.
     const r = Math.max(700, ...systems.filter((s) => !dragged(s.pv)).map((s) => Math.hypot(s.rx, s.ry) + s.extent + 120));
@@ -178,6 +185,7 @@ export function buildSpace(
       total: sum((s) => s.pv.stats.total),
       parked: sum((s) => s.pv.stats.parked),
       overdue: sum((s) => s.pv.stats.overdue),
+      items: sum((s) => s.pv.itemCount ?? 0),
       matches: !filterOn || systems.some((s) => s.pv.matches),
       hasActive: systems.some((s) => s.pv.hasActive),
       beacons: group ? (beaconsOfGalaxy.get(group.id) ?? []) : [],
