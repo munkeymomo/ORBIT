@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { buildModel } from '../../src/components/universe/model';
 import { buildSpace, CLUTTER } from '../../src/components/universe/space';
-import { layoutSky, starSummary } from '../../src/components/universe/skyLabels';
+import { layoutSky, starShowsMeta, starSummary } from '../../src/components/universe/skyLabels';
 import { changedInSystem, changedMoons, changedText } from '../../src/host/changed';
 import { adaptVerse } from '../../src/host/adapt';
 import { abilities } from '../../src/host/caps';
@@ -145,5 +145,25 @@ describe('changed moons, derived (no protocol field)', () => {
     expect(sky.planets.get('t2')!.pill).toBeUndefined();
     // the pill is a line of its own in the label's box
     expect(sky.planets.get('t1')!.rect.h).toBeGreaterThan(sky.planets.get('t2')!.rect.h);
+  });
+});
+
+describe('the count line under a star', () => {
+  it('a system holding exactly one item shows "1 item" wherever its neighbours show "n items"', () => {
+    const w = world([item('i1', 's1', []), item('a1', 's2', []), item('a2', 's2', []), item('a3', 's2', []), item('a4', 's2', []), item('a5', 's2', []), item('a6', 's2', []), item('a7', 's2', []), item('a8', 's2', []), item('a9', 's2', []), item('a10', 's2', []), item('a11', 's2', []), item('a12', 's2', [])]);
+    const one = w.sys('s1').pv;
+    const many = w.sys('s2').pv;
+    expect(one.itemCount).toBe(1);
+    expect(starSummary(one)).toBe('1 item');
+    expect(starSummary(many)).toBe('12 items');
+    // the single-item star is the smaller one: at a zoom where its radius is under 15 px it used to lose its line
+    expect(one.radius).toBeLessThan(many.radius);
+    for (const k of [0.17, 0.2, 0.24, 0.28, 0.3, 0.35, 0.4, 0.5]) {
+      expect(starShowsMeta(one, k), `k=${k}`).toBe(true);
+      expect(starShowsMeta(many, k), `k=${k}`).toBe(true);
+    }
+    // a system with nothing to count keeps the old rule
+    const empty = world([task('t1', 's3', [])]).sys('s3').pv;
+    expect(starShowsMeta({ ...empty, radius: 40 }, 0.2)).toBe(false);
   });
 });

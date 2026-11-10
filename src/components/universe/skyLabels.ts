@@ -29,6 +29,15 @@ export function beaconText(b: Beacon, today: string, full: boolean): string {
 /** The star's size on screen, as StarNode draws it. */
 export const starRadius = (s: SystemPlace, k: number) => clamp(s.pv.radius * k, 9, 66);
 
+/**
+ * Whether the line under a star's name (its counts) is drawn. A big star or a close view shows it; a system that holds
+ * items always does ("n items", "1 item"), so one holding a single item, the smallest star of its galaxy, is not the one
+ * that loses its line while its neighbours keep theirs.
+ */
+export function starShowsMeta(pv: SystemPlace['pv'], k: number): boolean {
+  return clamp(pv.radius * k, 9, 66) >= 15 || k >= 0.5 || (pv.itemCount ?? 0) > 0;
+}
+
 /** A system's name as it is drawn: up to three lines, the middle cut ("Head… tail") when it still does not fit. */
 export function starNameLines(name: string, rs: number, measure: Measure): string[] {
   const scale = (rs >= 30 ? 15 : 13) / 11.5;

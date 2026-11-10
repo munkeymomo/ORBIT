@@ -43,7 +43,7 @@ import {
 } from './space';
 import { SpacePainter } from './SpacePainter';
 import { circleRect, moonListPlacement, outsideSystem, overlaps, type Measure, type OrbitLabel } from './labels';
-import { layoutSky, STAR_NAME_W, starNameLines, starNameRect, starRadius } from './skyLabels';
+import { layoutSky, STAR_NAME_W, starNameLines, starShowsMeta, starNameRect, starRadius } from './skyLabels';
 import { requestPanelSection } from '../task/panelSection';
 
 /** Text widths for label layout, measured with the same font the labels use (an estimate without a canvas). */
@@ -1463,7 +1463,7 @@ function StarNode({
   const ring = rs + 6;
   const C = 2 * Math.PI * ring;
   const pct = Math.round(stats.progress * 100);
-  const showMeta = rs >= 15 || k >= 0.5;
+  const showMeta = starShowsMeta(s.pv, k);
   const label = portalTo
     ? `${project.name}: a way ${portalTo}. ${current ? 'Open details.' : 'Fly to it.'}`
     : `${project.name}. ${stats.total || !s.pv.itemCount ? `${stats.open} open, ${stats.parked} parked, ${stats.done} done, ${pct}% complete.` : ''}${s.pv.itemCount ? ` ${s.pv.itemCount} items.` : ''}${stats.overdue ? ` ${stats.overdue} overdue.` : ''}${changed ? ` ${changedText(changed)}.` : ''} ${current ? 'Open details.' : 'Fly to this system.'}`;
