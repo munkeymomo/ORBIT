@@ -16,7 +16,7 @@ import { verseSwitch } from '../../host/verses';
 import { arrowCurves, curveLabelPoint, planetSpots, starBoxes } from './arrows';
 import { VerseBar } from './VerseBar';
 import { useOfferedVerses, WormholeMark, wormholeText } from '../host/Wormholes';
-import { placeGalaxyLabels } from './galaxyLabels';
+import { galaxyLabelHeight, placeGalaxyLabels } from './galaxyLabels';
 import {
   buildSpace,
   galaxyBeaconSpot,
@@ -40,8 +40,8 @@ import {
   type View,
 } from './space';
 import { SpacePainter } from './SpacePainter';
-import { moonListPlacement, outsideSystem, type Measure, type OrbitLabel } from './labels';
-import { layoutSky, STAR_NAME_W, starNameLines } from './skyLabels';
+import { circleRect, moonListPlacement, outsideSystem, overlaps, type Measure, type OrbitLabel } from './labels';
+import { layoutSky, STAR_NAME_W, starNameLines, starNameRect, starRadius } from './skyLabels';
 import { requestPanelSection } from '../task/panelSection';
 
 /** Text widths for label layout, measured with the same font the labels use (an estimate without a canvas). */
@@ -818,9 +818,16 @@ export function UniverseCanvas({ onNewSystem, onNewGalaxy }: { onNewSystem: (gal
             if (!onScreen(cx, cy, sr * 1.2) || k > 1.05) return null;
             const universe = level === 'universe';
             const spot = galaxyLabels?.get(g.id);
+            // its words never show through the minimap or the zoom control (nor the toolbar's row)
+            const lw = Math.max(universe ? 150 : 90, measureGalaxyName(g.name) + 34, measureLabel(galaxyCountText(g)) + 34, g.host?.chip ? measureLabel(g.host.chip) + 40 : 0);
+            const lh = universe ? galaxyLabelHeight(!!g.host?.chip || isYours(can.hosted, g), !!spot?.brief) : 44;
+            const lx = universe && spot ? (spot.side === 'left' ? spot.x + spot.w - lw : spot.side === 'right' ? spot.x : spot.x + spot.w / 2 - lw / 2) : cx - lw / 2;
+            const ly = universe ? (spot?.y ?? cy + Math.min(sr * 0.92, sr * 0.5 + 70)) : cy - sr - 6 - lh;
+            const under = ui.some((r) => overlaps({ x: lx, y: ly, w: lw, h: lh }, r));
             return (
               <GalaxyLabel
                 key={g.id}
+                clipped={under}
                 g={g}
                 x={universe && spot ? (spot.side === 'left' ? spot.x + spot.w : spot.side === 'right' ? spot.x : spot.x + spot.w / 2) : cx}
                 beside={universe && spot && (spot.side === 'left' || spot.side === 'right') ? spot.side : undefined}
@@ -856,6 +863,7 @@ export function UniverseCanvas({ onNewSystem, onNewGalaxy }: { onNewSystem: (gal
                   current={ctx.system?.pv.project.id === s.pv.project.id}
                   close={k >= LOD.planets && !s.busy}
                   faded={ctx.system?.pv.project.id !== s.pv.project.id && sy - clamp(s.pv.radius * k, 9, 66) < (size.top ?? 76)}
+                  clipped={ui.some((r) => overlaps(circleRect(sx, sy, starRadius(s, k) + 8), r) || overlaps(starNameRect(s, sx, sy, k, measureLabel), r))}
                   dimmed={dim && !s.pv.matches}
                   dragging={drag?.kind === 'system' && drag.id === s.pv.project.id}
                   onPointerDown={(e) => startDrag(e, 'system', s.pv.project.id, s.x, s.y, g.id)}
@@ -1297,6 +1305,7 @@ function Breadcrumbs({ ctx, galaxies, onFly, onUp, compact = false }: { ctx: { g
 }
 
 function GalaxyLabel({
+  clipped = false,
   g,
   x,
   y,
@@ -1311,6 +1320,8 @@ function GalaxyLabel({
   onPointerDown,
   onClick,
 }: {
+  /** Under the minimap or the zoom control: not drawn. */
+  clipped?: boolean;
   g: GalaxyPlace;
   dropTarget?: boolean;
   x: number;
@@ -1344,8 +1355,10 @@ function GalaxyLabel({
         compact ? '-translate-y-full px-3 py-1' : 'px-4 py-2 hover:bg-white/5',
         dragging ? 'cursor-grabbing' : 'cursor-pointer',
         dropTarget && 'bg-white/10 ring-2 ring-white/60',
+        clipped && 'pointer-events-none',
       )}
-      style={{ left: x, top: y, opacity: dimmed ? 0.35 : 1 }}
+      style={{ left: x, top: y, opacity: clipped ? 0 : dimmed ? 0.35 : 1 }}
+      tabIndex={clipped ? -1 : undefined}
     >
       <span className={cx('block font-display font-semibold tracking-[0.14em] uppercase [text-shadow:0_1px_12px_rgba(0,0,0,.9)]', compact ? 'text-[11px]' : 'text-[15px]')} style={{ color: g.virtual ? '#b8bdcc' : g.hex }}>
         {g.name}
@@ -1386,6 +1399,7 @@ function StarNode({
   current,
   close = false,
   faded = false,
+  clipped = false,
   dimmed,
   dragging,
   onPointerDown,
@@ -1394,6 +1408,8 @@ function StarNode({
   onPortal,
 }: {
   s: SystemPlace;
+  /** Under the minimap or the zoom control: not drawn. */
+  clipped?: boolean;
   /** A portal: the chip's words ("to Things"). */
   portalTo?: string;
   onPortal?: () => void;
@@ -1422,10 +1438,10 @@ function StarNode({
     ? `${project.name}: a way ${portalTo}. ${current ? 'Open details.' : 'Fly to it.'}`
     : `${project.name}. ${stats.total || !s.pv.itemCount ? `${stats.open} open, ${stats.parked} parked, ${stats.done} done, ${pct}% complete.` : ''}${s.pv.itemCount ? ` ${s.pv.itemCount} items.` : ''}${stats.overdue ? ` ${stats.overdue} overdue.` : ''} ${current ? 'Open details.' : 'Fly to this system.'}`;
   const box = ring * 2 + 8;
-  if (portalTo) return <PortalNode s={s} x={x} y={y} rs={rs} label={label} chip={portalTo} selected={selected} current={current} faded={faded} dimmed={dimmed} dragging={dragging} onPointerDown={onPointerDown} onClick={onClick} onPortal={onPortal} />;
+  if (portalTo) return <PortalNode s={s} x={x} y={y} rs={rs} label={label} chip={portalTo} selected={selected} current={current} faded={faded || clipped} dimmed={dimmed} dragging={dragging} onPointerDown={onPointerDown} onClick={onClick} onPortal={onPortal} />;
   return (
     <>
-    <div className={cx('absolute', faded && 'pointer-events-none')} style={{ left: x, top: y, width: 0, height: 0, opacity: dimmed ? 0.3 : faded ? 0.35 : 1, zIndex: dragging ? 30 : selected ? 22 : 18 }}>
+    <div className={cx('absolute', (faded || clipped) && 'pointer-events-none')} style={{ left: x, top: y, width: 0, height: 0, opacity: clipped ? 0 : dimmed ? 0.3 : faded ? 0.35 : 1, zIndex: dragging ? 30 : selected ? 22 : 18 }}>
       {/* corona */}
       <span
         className="pointer-events-none absolute rounded-full"
@@ -1487,7 +1503,7 @@ function StarNode({
     {/* its name: above the planets (nothing is drawn over it), three lines at most; a name too long for that loses its middle, not its end */}
     <div
       className={cx('pointer-events-none absolute -translate-x-1/2 text-center', close && 'rounded-lg bg-[#05070f]/70 px-2 py-0.5 backdrop-blur-[2px]')}
-      style={{ left: x, top: y + ring + 8, width: close ? 'max-content' : STAR_NAME_W, maxWidth: STAR_NAME_W, opacity: dimmed ? 0.3 : faded ? 0.35 : 1, zIndex: dragging ? 30 : 24 }}
+      style={{ left: x, top: y + ring + 8, width: close ? 'max-content' : STAR_NAME_W, maxWidth: STAR_NAME_W, opacity: clipped ? 0 : dimmed ? 0.3 : faded ? 0.35 : 1, zIndex: dragging ? 30 : 24 }}
     >
       <div title={project.name} className={cx('font-display leading-tight font-semibold [text-shadow:0_0_3px_#000,0_1px_10px_rgba(0,0,0,.95)]', rs >= 30 ? 'text-[15px]' : 'text-[13px]', current ? 'text-white' : 'text-text')}>
         {starNameLines(project.name, rs, measureLabel).map((l, i) => (

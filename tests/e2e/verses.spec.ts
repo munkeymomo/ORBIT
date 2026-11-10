@@ -164,3 +164,20 @@ test('the legend of a verse that holds records lists only what is true for recor
   await expect(panel.getByText('Planet: a task. Size = estimated effort.')).toBeVisible();
   await expect(panel.getByText('Waiting on another task')).toBeVisible();
 });
+
+test('a galaxy\'s words never show through the minimap', async ({ page }, info) => {
+  test.skip(info.project.name === 'phone', 'desktop canvas');
+  await openDemo(page);
+  await page.keyboard.press('0');
+  await page.waitForTimeout(700);
+  const label = page.getByRole('button', { name: /^House move galaxy/ });
+  const opacity = () => label.evaluate((e) => Number(getComputedStyle(e).opacity));
+  expect(await opacity()).toBe(1);
+  // drag the sky until House move sits under the minimap
+  await page.mouse.move(900, 300);
+  await page.mouse.down();
+  await page.mouse.move(550, 520, { steps: 5 });
+  await page.mouse.move(200, 740, { steps: 5 });
+  await page.mouse.up();
+  await expect.poll(opacity).toBe(0);
+});
