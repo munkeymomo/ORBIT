@@ -13,6 +13,7 @@ export const DEFAULT_PREFS: Prefs = {
   nextEnergy: 'medium',
   nextMinutes: 45,
   deepSpace: { x: 0, y: 0 },
+  layers: { moons: true, belts: true, beacons: true },
   updatedAt: 0,
 };
 

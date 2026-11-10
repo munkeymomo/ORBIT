@@ -18,7 +18,7 @@ export interface StorageAdapter {
   replaceAll(s: Snapshot): Promise<void>;
 }
 
-const TABLES: TableName[] = ['projects', 'groups', 'tasks', 'checkpoints', 'sessions', 'captures', 'dayItems'];
+export const TABLES: TableName[] = ['projects', 'groups', 'tasks', 'checkpoints', 'sessions', 'captures', 'dayItems', 'placements', 'taskWork'];
 
 export function emptySnapshot(): Snapshot {
   return {
@@ -29,6 +29,8 @@ export function emptySnapshot(): Snapshot {
     sessions: [],
     captures: [],
     dayItems: [],
+    placements: [],
+    taskWork: [],
     prefs: { ...DEFAULT_PREFS },
     focus: null,
   };
@@ -46,7 +48,7 @@ export class DexieAdapter implements StorageAdapter {
 
   async load(): Promise<Snapshot> {
     const d = this.db;
-    const [projects, groups, tasks, checkpoints, sessions, captures, dayItems, prefsRow, focusRow] = await Promise.all([
+    const [projects, groups, tasks, checkpoints, sessions, captures, dayItems, placements, taskWork, prefsRow, focusRow] = await Promise.all([
       d.projects.toArray(),
       d.groups.toArray(),
       d.tasks.toArray(),
@@ -54,6 +56,8 @@ export class DexieAdapter implements StorageAdapter {
       d.sessions.toArray(),
       d.captures.toArray(),
       d.dayItems.toArray(),
+      d.placements.toArray(),
+      d.taskWork.toArray(),
       d.kv.get('prefs'),
       d.kv.get('focus'),
     ]);
@@ -65,6 +69,8 @@ export class DexieAdapter implements StorageAdapter {
       sessions,
       captures,
       dayItems,
+      placements,
+      taskWork,
       prefs: { ...DEFAULT_PREFS, ...((prefsRow?.value as Partial<Prefs>) ?? {}) },
       focus: (focusRow?.value as FocusRuntime | undefined) ?? null,
     };
@@ -102,7 +108,7 @@ export class DexieAdapter implements StorageAdapter {
     await d.transaction('rw', tables, async () => {
       for (const t of TABLES) {
         await d.table(t).clear();
-        const rows = s[t] as { id: string }[];
+        const rows = (s[t] ?? []) as { id: string }[];
         if (rows.length) await d.table(t).bulkPut(rows);
       }
       await d.tombstones.clear();
@@ -125,7 +131,7 @@ export class MemoryAdapter implements StorageAdapter {
   failWrites = false;
 
   constructor(initial?: Snapshot) {
-    this.data = initial ? structuredClone(initial) : emptySnapshot();
+    this.data = initial ? { ...emptySnapshot(), ...structuredClone(initial) } : emptySnapshot();
   }
 
   private guard() {
@@ -138,6 +144,7 @@ export class MemoryAdapter implements StorageAdapter {
 
   async put(table: TableName, record: { id: string }) {
     this.guard();
+    if (!this.data[table]) (this.data[table] as { id: string }[]) = [];
     const rows = this.data[table] as { id: string }[];
     const i = rows.findIndex((r) => r.id === record.id);
     if (i >= 0) rows[i] = structuredClone(record);
@@ -151,7 +158,7 @@ export class MemoryAdapter implements StorageAdapter {
   async remove(table: TableName, ids: string[]) {
     this.guard();
     const set = new Set(ids);
-    (this.data[table] as { id: string }[]) = (this.data[table] as { id: string }[]).filter((r) => !set.has(r.id));
+    (this.data[table] as { id: string }[]) = ((this.data[table] ?? []) as { id: string }[]).filter((r) => !set.has(r.id));
   }
 
   async setPrefs(prefs: Prefs) {
@@ -166,7 +173,7 @@ export class MemoryAdapter implements StorageAdapter {
 
   async replaceAll(s: Snapshot) {
     this.guard();
-    this.data = structuredClone(s);
+    this.data = { ...emptySnapshot(), ...structuredClone(s) };
   }
 }
 

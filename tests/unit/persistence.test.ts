@@ -1,8 +1,8 @@
 import { gridSlot, spiralSlot } from '../../src/data/layout';
 import { describe, expect, it } from 'vitest';
 import Dexie from 'dexie';
-import { OrbitDB } from '../../src/data/db';
-import { DexieAdapter } from '../../src/data/storage';
+import { CURRENT_DB_VERSION, OrbitDB } from '../../src/data/db';
+import { DexieAdapter, emptySnapshot } from '../../src/data/storage';
 import { createBackup, parseBackupText, validateBackup } from '../../src/lib/backup';
 import { createOrbitStore } from '../../src/store/store';
 
@@ -25,7 +25,7 @@ describe('IndexedDB persistence', () => {
     const reopened = new DexieAdapter(new OrbitDB(name));
     const loaded = await reopened.load();
     const before = store.getState().snapshot();
-    for (const k of ['projects', 'groups', 'tasks', 'checkpoints', 'sessions', 'captures', 'dayItems'] as const) {
+    for (const k of ['projects', 'groups', 'tasks', 'checkpoints', 'sessions', 'captures', 'dayItems', 'placements', 'taskWork'] as const) {
       expect(loaded[k].length, k).toBe(before[k].length);
     }
     expect(loaded.prefs.focusMin).toBe(45);
@@ -56,7 +56,7 @@ describe('IndexedDB persistence', () => {
 
     const v2 = new OrbitDB(name);
     await v2.open();
-    expect(v2.verno).toBe(4);
+    expect(v2.verno).toBe(CURRENT_DB_VERSION);
     const t = await v2.tasks.get('t1');
     expect(t).toMatchObject({ links: [], dependsOn: [], energy: 'medium', priority: 2, due: null });
     const p = await v2.projects.get('p1');
@@ -84,7 +84,7 @@ describe('IndexedDB persistence', () => {
 
     const v3 = new OrbitDB(name);
     await v3.open();
-    expect(v3.verno).toBe(4);
+    expect(v3.verno).toBe(CURRENT_DB_VERSION);
     const groups = await v3.groups.toArray();
     const [g1, g2] = groups.sort((x, y) => x.id.localeCompare(y.id));
     expect(Number.isFinite(g1.x) && Number.isFinite(g1.y)).toBe(true);
@@ -123,7 +123,7 @@ describe('IndexedDB persistence', () => {
 
     const v4 = new OrbitDB(name);
     await v4.open();
-    expect(v4.verno).toBe(4);
+    expect(v4.verno).toBe(CURRENT_DB_VERSION);
     const byId = Object.fromEntries((await v4.groups.toArray()).map((g) => [g.id, g]));
     expect(byId.g3).toMatchObject({ x: 12345, y: -777 }); // hand-placed: untouched
     expect(byId.g1).toMatchObject(spiralSlot(0)); // oldest at the centre
@@ -137,6 +137,34 @@ describe('IndexedDB persistence', () => {
     for (let i = 0; i < centres.length; i++)
       for (let j = i + 1; j < centres.length; j++) expect(Math.hypot(centres[i].x - centres[j].x, centres[i].y - centres[j].y)).toBeGreaterThanOrEqual(3000);
     v4.close();
+  });
+
+  it('upgrades v4 to v5: two empty tables appear and nothing else changes', async () => {
+    const name = freshName();
+    const v4 = new OrbitDB(name, 4);
+    await v4.open();
+    await v4.table('groups').put({ id: 'g1', name: 'Garden', color: 'lime', createdAt: 1, updatedAt: 1, x: 120, y: -40 });
+    await v4.table('projects').put({ id: 'p1', name: 'Beds', groupId: 'g1', x: 10, y: 20, color: 'lime', icon: 'orbit', archived: false });
+    await v4.table('kv').put({ key: 'prefs', value: { theme: 'light', deepSpace: { x: 5, y: 6 } } });
+    v4.close();
+
+    const v5 = new OrbitDB(name);
+    await v5.open();
+    expect(v5.verno).toBe(5);
+    expect(v5.tables.map((t) => t.name)).toEqual(expect.arrayContaining(['placements', 'taskWork']));
+    expect(await v5.placements.count()).toBe(0);
+    expect(await v5.taskWork.count()).toBe(0);
+    expect(await v5.groups.get('g1')).toMatchObject({ x: 120, y: -40 });
+    expect(await v5.projects.get('p1')).toMatchObject({ x: 10, y: 20, groupId: 'g1' });
+    expect(((await v5.kv.get('prefs'))!.value as { deepSpace: unknown }).deepSpace).toEqual({ x: 5, y: 6 });
+    // the new tables round-trip through the adapter
+    const a = new DexieAdapter(v5);
+    await a.put('placements', { id: 'g|g1', x: 1, y: 2, updatedAt: 3 } as never);
+    await a.put('taskWork', { id: 't1', energy: 'low', updatedAt: 3 } as never);
+    const snap = await a.load();
+    expect(snap.placements).toEqual([{ id: 'g|g1', x: 1, y: 2, updatedAt: 3 }]);
+    expect(snap.taskWork[0]).toMatchObject({ id: 't1', energy: 'low' });
+    v5.close();
   });
 
   it('restore is all-or-nothing', async () => {
@@ -247,6 +275,38 @@ describe('backup files', () => {
     const g = Object.fromEntries(r.data!.groups.map((x) => [x.id, x]));
     expect(g.h).toMatchObject(spiralSlot(1));
     expect(g.m).toMatchObject({ x: -9000, y: 4000 });
+  });
+
+  it('migrates a v4 backup to v5 (adds the two host tables, empty)', () => {
+    const r = validateBackup({
+      app: 'orbit',
+      schemaVersion: 4,
+      projects: [{ id: 'p', name: 'P', groupId: null, x: 0, y: 0 }],
+      groups: [],
+      tasks: [{ id: 'a', projectId: 'p', title: 'A' }],
+      checkpoints: [],
+      sessions: [],
+      captures: [],
+      dayItems: [],
+      prefs: { deepSpace: { x: 1, y: 2 } },
+    });
+    expect(r.ok).toBe(true);
+    expect(r.data!.placements).toEqual([]);
+    expect(r.data!.taskWork).toEqual([]);
+    expect(r.data!.prefs.deepSpace).toEqual({ x: 1, y: 2 });
+  });
+
+  it('writes schema 5 backups that carry placements and task work', () => {
+    const file = createBackup({
+      ...emptySnapshot(),
+      placements: [{ id: 'g|x', x: 10, y: 20, updatedAt: 1 }],
+      taskWork: [{ id: 't', energy: 'high', updatedAt: 1 }],
+    });
+    expect(file.schemaVersion).toBe(5);
+    const r = parseBackupText(JSON.stringify(file));
+    expect(r.ok).toBe(true);
+    expect(r.data!.placements).toEqual([{ id: 'g|x', x: 10, y: 20, updatedAt: 1 }]);
+    expect(r.data!.taskWork[0]).toMatchObject({ id: 't', energy: 'high' });
   });
 
   it('migrates a v1 backup (no groups, sparse tasks)', () => {

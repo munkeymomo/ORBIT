@@ -3,7 +3,7 @@ import { DEFAULT_PREFS, normaliseTask } from '../data/normalise';
 import { migrateLayoutV2toV3, relayoutAutoPlaced } from '../data/layout';
 
 export const BACKUP_APP = 'orbit';
-export const SCHEMA_VERSION = 4;
+export const SCHEMA_VERSION = 5;
 
 export interface BackupFile extends Omit<Snapshot, 'focus'> {
   app: typeof BACKUP_APP;
@@ -24,7 +24,7 @@ export interface ValidationResult {
   counts?: Record<string, number>;
 }
 
-const TABLES = ['projects', 'groups', 'tasks', 'checkpoints', 'sessions', 'captures', 'dayItems'] as const;
+const TABLES = ['projects', 'groups', 'tasks', 'checkpoints', 'sessions', 'captures', 'dayItems', 'placements', 'taskWork'] as const;
 
 /** Brings an older backup up to the current schema before validation. */
 export function migrateBackup(raw: Record<string, unknown>): Record<string, unknown> {
@@ -60,6 +60,12 @@ export function migrateBackup(raw: Record<string, unknown>): Record<string, unkn
       out.prefs = { ...prefs, deepSpace: r.deepSpace };
     }
     out.schemaVersion = 4;
+  }
+  if ((out.schemaVersion as number) < 5) {
+    // v5 added two tables used when ORBIT runs inside a host application; older backups have neither.
+    out.placements = Array.isArray(out.placements) ? out.placements : [];
+    out.taskWork = Array.isArray(out.taskWork) ? out.taskWork : [];
+    out.schemaVersion = 5;
   }
   return out;
 }
@@ -115,6 +121,8 @@ export function validateBackup(input: unknown): ValidationResult {
     sessions: arr('sessions') as unknown as Snapshot['sessions'],
     captures: arr('captures') as unknown as Snapshot['captures'],
     dayItems: dayItems as unknown as Snapshot['dayItems'],
+    placements: arr('placements').map((p) => ({ ...p, x: typeof p.x === 'number' ? p.x : 0, y: typeof p.y === 'number' ? p.y : 0 })) as unknown as Snapshot['placements'],
+    taskWork: arr('taskWork') as unknown as Snapshot['taskWork'],
     prefs: { ...DEFAULT_PREFS, ...((m.prefs as object) ?? {}) } as Snapshot['prefs'],
     focus,
   };

@@ -5,8 +5,10 @@ import type {
   DayItem,
   FocusSession,
   Group,
+  Placement,
   Project,
   Task,
+  TaskWork,
   Tombstone,
 } from '../types';
 import { normaliseTask } from './normalise';
@@ -25,6 +27,8 @@ export class OrbitDB extends Dexie {
   sessions!: Table<FocusSession, string>;
   captures!: Table<Capture, string>;
   dayItems!: Table<DayItem, string>;
+  placements!: Table<Placement, string>;
+  taskWork!: Table<TaskWork, string>;
   kv!: Table<KVRow, string>;
   tombstones!: Table<Tombstone, string>;
 
@@ -34,7 +38,7 @@ export class OrbitDB extends Dexie {
   }
 }
 
-export const CURRENT_DB_VERSION = 4;
+export const CURRENT_DB_VERSION = 5;
 
 /**
  * Schema history. Never edit a released version: add a new one with an upgrade().
@@ -111,4 +115,12 @@ export function defineVersions(db: Dexie, upTo: number) {
       for (const [id, at] of out.moves) await tx.table('groups').update(id, { x: at.x, y: at.y });
       await tx.table('kv').put({ key: 'prefs', value: { ...(prefsRow?.value ?? {}), deepSpace: out.deepSpace } });
     });
+  if (upTo < 5) return;
+
+  // v5 — two tables for running inside a host application (src/host): where the person put each host
+  // galaxy and system, and ORBIT's own working state for host tasks. Both start empty; nothing moves.
+  db.version(5).stores({
+    placements: 'id',
+    taskWork: 'id',
+  });
 }

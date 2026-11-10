@@ -844,6 +844,8 @@ export function createOrbitStore(deps: StoreDeps = {}): StoreApi<OrbitState> {
           sessions: s.sessions,
           captures: s.captures,
           dayItems: s.dayItems,
+          placements: s.placements,
+          taskWork: s.taskWork,
           prefs: s.prefs,
           focus: s.focus,
         };

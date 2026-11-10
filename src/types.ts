@@ -1,3 +1,5 @@
+import type { Also, Caps, Fact, Open } from './host/types';
+
 export type ID = string;
 
 /** 1 = low, 2 = normal, 3 = high, 4 = critical */
@@ -30,12 +32,43 @@ export interface Subtask {
   done: boolean;
 }
 
+/**
+ * Marks a record that a host application owns (see src/host/PROTOCOL.md). Only ever in memory: such
+ * records are rebuilt from the host's verse and are never written to storage.
+ */
+export interface HostRef {
+  /** The host's id for the record (the record's own id is the same). */
+  id: string;
+  kind: 'galaxy' | 'system' | 'task';
+  /** The verse it came from. */
+  verse: string;
+  /** What may be changed on it. Anything missing is false. */
+  caps: Caps;
+  code?: string;
+  status?: string;
+  chip?: string;
+  note?: string;
+  /** A holder the host made up, not a record of its own. */
+  virtual?: boolean;
+  /** A galaxy that is finished: hidden unless finished galaxies are shown. */
+  finished?: boolean;
+  /** A task done without being done: shown struck through. */
+  dropped?: boolean;
+  cluster?: string;
+  /** How many things a system stands for, when its planets are only some of them. */
+  count?: number;
+  facts?: Fact[];
+  open?: Open;
+  also?: Also[];
+}
+
 /** A galaxy in the Universe. Its systems (projects) are positioned relative to (x, y). */
 export interface Group extends Base {
   name: string;
   color: string;
   x: number;
   y: number;
+  host?: HostRef;
 }
 
 export interface Project extends Base {
@@ -49,6 +82,7 @@ export interface Project extends Base {
   x: number;
   y: number;
   archived: boolean;
+  host?: HostRef;
 }
 
 export interface Task extends Base {
@@ -68,6 +102,32 @@ export interface Task extends Base {
   links: Link[];
   completedAt: number | null;
   parkedAt: number | null;
+  host?: HostRef;
+}
+
+/**
+ * Where a host galaxy or system sits. Keyed `g|<galaxy id>` for a galaxy (shared by every verse) and
+ * `<verse id>|<system id>` for a system (relative to its galaxy). Standalone ORBIT does not use it.
+ */
+export interface Placement {
+  id: string;
+  x: number;
+  y: number;
+  updatedAt: number;
+}
+
+/** ORBIT's own working state for a task a host owns (id = the host's task id). Nothing writes it yet. */
+export interface TaskWork {
+  id: ID;
+  parked?: boolean;
+  parkedAt?: number | null;
+  energy?: Energy;
+  estimateMin?: number | null;
+  progress?: number;
+  subtasks?: Subtask[];
+  dependsOn?: ID[];
+  links?: Link[];
+  updatedAt: number;
 }
 
 export interface TimerSnapshot {
@@ -136,6 +196,8 @@ export interface Prefs {
   nextMinutes: number;
   /** Centre of "deep space", where projects without a galaxy live. */
   deepSpace: { x: number; y: number };
+  /** What the Universe draws besides tasks when a host provides it. */
+  layers: { moons: boolean; belts: boolean; beacons: boolean };
   updatedAt: number;
 }
 
@@ -173,7 +235,9 @@ export type TableName =
   | 'checkpoints'
   | 'sessions'
   | 'captures'
-  | 'dayItems';
+  | 'dayItems'
+  | 'placements'
+  | 'taskWork';
 
 export interface Snapshot {
   projects: Project[];
@@ -183,6 +247,8 @@ export interface Snapshot {
   sessions: FocusSession[];
   captures: Capture[];
   dayItems: DayItem[];
+  placements: Placement[];
+  taskWork: TaskWork[];
   prefs: Prefs;
   focus: FocusRuntime | null;
 }
