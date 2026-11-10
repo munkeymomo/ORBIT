@@ -209,6 +209,8 @@ test('universe: fly into galaxies and systems, step back out, jump between them'
   const moved = (await label.boundingBox())!;
   expect(moved.x).toBeLessThan(before.x - 80);
   await page.reload();
+  // a key pressed before the app is ready (still loading its data) does nothing: wait for it first
+  await expect(page.locator('#main')).toBeVisible();
   await page.keyboard.press('0');
   await expect(page.getByRole('button', { name: /^Life \(example\) galaxy/ })).toBeVisible();
 });
