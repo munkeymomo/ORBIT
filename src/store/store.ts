@@ -291,13 +291,15 @@ export function createOrbitStore(deps: StoreDeps = {}): StoreApi<OrbitState> {
 
     const onSaveError = (err: unknown) => {
       console.error('[orbit] save failed', err);
+      // said once: not again within a few seconds, nor while the same words are still on screen
       if (now() - lastSaveErrorAt < 8000) return;
+      const a = get()?.host ? can() : null;
+      const text = a
+        ? `Could not save with ${a.name}. Your change is still on screen, but may be lost when ORBIT is next opened.${a.personal ? ' Download a backup from Settings to be safe.' : ''}`
+        : 'Could not save to this device. Your change is still on screen — export a backup from Settings to be safe.';
+      if (get().toasts.some((t) => t.text === text)) return;
       lastSaveErrorAt = now();
-      get().toast({
-        tone: 'danger',
-        text: 'Could not save to this device. Your change is still on screen — export a backup from Settings to be safe.',
-        timeout: 9000,
-      });
+      get().toast({ tone: 'danger', text, timeout: 9000 });
     };
     const save = (p: Promise<unknown>) => {
       p.catch(onSaveError);
@@ -314,6 +316,11 @@ export function createOrbitStore(deps: StoreDeps = {}): StoreApi<OrbitState> {
       return undefined;
     };
     /** A refused change: nothing happens, and a toast says why (once, while it is on screen). */
+    /** A toast about a host's answer, shown once while the same words are on screen. */
+    const sayOnce = (text: string) => {
+      if (get().toasts.some((t) => t.text === text)) return;
+      get().toast({ tone: 'danger', text, timeout: 8000 });
+    };
     const refuse = (text: string, open?: Open) => {
       if (get().toasts.some((t) => t.text === text)) return;
       get().toast(open && hostApi ? { text, action: { label: can().openLabel, run: () => get().openInHost(open) }, timeout: 8000 } : { text });
@@ -333,7 +340,7 @@ export function createOrbitStore(deps: StoreDeps = {}): StoreApi<OrbitState> {
       onWork: (id: string, row: TaskWork | null) => set({ taskWork: [...get().taskWork.filter((w) => w.id !== id), ...(row ? [row] : [])] }),
       current: (id) => get().tasks.find((t) => t.id === id),
       revise: (id, patch) => set({ tasks: get().tasks.map((t) => (t.id === id ? { ...t, ...patch } : t)) }),
-      refused: (reason) => get().toast({ tone: 'danger', text: reason, timeout: 8000 }),
+      refused: (reason) => sayOnce(reason),
       adopt: (id, planet, settled) => {
         const cur = get().tasks.find((t) => t.id === id);
         if (!cur?.host) return;
@@ -360,7 +367,7 @@ export function createOrbitStore(deps: StoreDeps = {}): StoreApi<OrbitState> {
         forget(tempId);
         const sorted = get().captures.filter((c) => c.sortedTaskId === tempId);
         for (const c of sorted) patchRow('captures', c.id, { status: 'inbox', sortedTaskId: null });
-        get().toast({ tone: 'danger', text: reason, timeout: 8000 });
+        sayOnce(reason);
       },
       removed: (id) => {
         removing.delete(id);
@@ -375,7 +382,7 @@ export function createOrbitStore(deps: StoreDeps = {}): StoreApi<OrbitState> {
           tasks.splice(Math.min(r.index, tasks.length), 0, r.task);
           set({ tasks });
         }
-        get().toast({ tone: 'danger', text: reason, timeout: 8000 });
+        sayOnce(reason);
       },
     });
 
