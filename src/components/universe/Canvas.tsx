@@ -775,6 +775,7 @@ export function UniverseCanvas({ onNewSystem, onNewGalaxy }: { onNewSystem: (gal
             arrowFocus={arrowFocus}
             galaxyBoxes={galaxyLabels ?? undefined}
             hosted={can.hosted}
+            selectedPlanet={selectedPlanet}
           />
         )}
 
@@ -791,7 +792,8 @@ export function UniverseCanvas({ onNewSystem, onNewGalaxy }: { onNewSystem: (gal
               <GalaxyLabel
                 key={g.id}
                 g={g}
-                x={universe && spot ? spot.x + spot.w / 2 : cx}
+                x={universe && spot ? (spot.side === 'left' ? spot.x + spot.w : spot.side === 'right' ? spot.x : spot.x + spot.w / 2) : cx}
+                beside={universe && spot && (spot.side === 'left' || spot.side === 'right') ? spot.side : undefined}
                 y={universe ? (spot?.y ?? cy + Math.min(sr * 0.92, sr * 0.5 + 70)) : cy - sr - 6}
                 compact={!universe}
                 brief={universe && !!spot?.brief}
@@ -981,13 +983,23 @@ export function UniverseCanvas({ onNewSystem, onNewGalaxy }: { onNewSystem: (gal
                 const outer = (s.belt ? s.belt.r + 26 : (s.rings.at(-1) ?? 0) + 30) * k;
                 const py = sy + sl.y * k;
                 // never over another planet's name
+                // (its own name included: the list never covers the selected planet's label either)
                 const names = [...s.pv.tasks.map((tv) => tv.task.id), ...s.pv.items.map((iv) => iv.item.id)]
-                  .filter((pid) => pid !== selId)
                   .map((pid) => skyWords.planets.get(pid))
                   .filter((l): l is OrbitLabel => !!l?.shown)
                   .map((l) => l.rect);
                 const out = outsideSystem({ sx, sy, py, outer, canvasW: size.w, canvasH: size.h, top: size.top ?? 76, w: 230, h, avoid: [...ui, ...names] });
-                const near = moonListPlacement({ x: px, off, canvasW: size.w, panelRight: !!selection, cap: 240 });
+                let near = moonListPlacement({ x: px, off, canvasW: size.w, panelRight: !!selection, cap: 240 });
+                // beside the planet: when its name sits above or below, the list would still start under it, so it
+                // is moved out past the name's end on its side
+                let nearOff = off;
+                if (!out && lab?.shown && py - h / 2 < lab.rect.y + lab.rect.h && py + h / 2 > lab.rect.y) {
+                  const past = near.left ? px - lab.rect.x + 10 : lab.rect.x + lab.rect.w - px + 10;
+                  if (past > nearOff) {
+                    nearOff = past;
+                    near = moonListPlacement({ x: px, off: nearOff, canvasW: size.w, panelRight: !!selection, cap: 240 });
+                  }
+                }
                 const left = out ? out.left : near.left;
                 const maxW = out ? out.box.w : near.maxW;
                 const anchor = out ? (out.left ? out.box.x + out.box.w : out.box.x) : px;
@@ -1002,7 +1014,7 @@ export function UniverseCanvas({ onNewSystem, onNewGalaxy }: { onNewSystem: (gal
                     families={families ?? {}}
                     x={anchor}
                     top={top}
-                    off={out ? 0 : off}
+                    off={out ? 0 : nearOff}
                     left={left}
                     maxW={maxW}
                     lead={lead}
@@ -1248,6 +1260,7 @@ function GalaxyLabel({
   y,
   compact,
   brief = false,
+  beside,
   yours = false,
   dimmed,
   inside,
@@ -1263,6 +1276,8 @@ function GalaxyLabel({
   compact: boolean;
   /** Universe level, crowded: the name (and chip) only; the counts show on hover. */
   brief?: boolean;
+  /** Universe level, label placed beside its galaxy: the words hug the galaxy's side instead of floating in a wide box. */
+  beside?: 'left' | 'right';
   /** Hosted: one of ORBIT's own galaxies (the host's carry their own chip). */
   yours?: boolean;
   dimmed: boolean;
@@ -1271,6 +1286,7 @@ function GalaxyLabel({
   onPointerDown: (e: React.PointerEvent) => void;
   onClick: () => void;
 }) {
+  const auto = beside === 'left' ? 'ml-auto' : beside === 'right' ? 'mr-auto' : 'mx-auto';
   const pct = g.total ? Math.round((g.done / g.total) * 100) : 0;
   const counts = galaxyCountText(g);
   const label = `${g.name} galaxy: ${counts}.${g.overdue ? ` ${g.overdue} overdue.` : ''}${inside && !g.virtual ? ' Open details.' : ' Fly in.'}`;
@@ -1281,7 +1297,8 @@ function GalaxyLabel({
       onPointerDown={onPointerDown}
       onClick={onClick}
       className={cx(
-        'absolute z-10 -translate-x-1/2 rounded-2xl text-center transition-opacity outline-none focus-visible:ring-2 focus-visible:ring-accent',
+        'absolute z-10 rounded-2xl transition-opacity outline-none focus-visible:ring-2 focus-visible:ring-accent',
+        beside === 'left' ? '-translate-x-full text-right' : beside === 'right' ? 'text-left' : '-translate-x-1/2 text-center',
         compact ? '-translate-y-full px-3 py-1' : 'px-4 py-2 hover:bg-white/5',
         dragging ? 'cursor-grabbing' : 'cursor-pointer',
         dropTarget && 'bg-white/10 ring-2 ring-white/60',
@@ -1292,12 +1309,12 @@ function GalaxyLabel({
         {g.name}
       </span>
       {g.host?.chip && (
-        <span className={cx('mx-auto mt-1 flex w-max max-w-[260px] items-center gap-1.5 truncate rounded-full border px-2 py-0.5 font-medium whitespace-nowrap', compact ? 'text-[10px]' : 'text-[11px]')} style={{ borderColor: `${g.hex}88`, color: '#dfe6ff', background: 'rgba(10,12,22,.72)' }}>
+        <span className={cx(auto, 'mt-1 flex w-max max-w-[260px] items-center gap-1.5 truncate rounded-full border px-2 py-0.5 font-medium whitespace-nowrap', compact ? 'text-[10px]' : 'text-[11px]')} style={{ borderColor: `${g.hex}88`, color: '#dfe6ff', background: 'rgba(10,12,22,.72)' }}>
           <span className="h-1.5 w-1.5 shrink-0 rounded-full" style={{ background: g.hex }} /> {g.host.chip}
         </span>
       )}
       {yours && (
-        <span className={cx('mx-auto mt-1 flex w-max items-center gap-1.5 rounded-full border px-2 py-0.5 font-medium whitespace-nowrap', compact ? 'text-[10px]' : 'text-[11px]')} style={{ borderColor: `${g.hex}66`, color: '#c9d1e8', background: 'rgba(10,12,22,.6)' }}>
+        <span className={cx(auto, 'mt-1 flex w-max items-center gap-1.5 rounded-full border px-2 py-0.5 font-medium whitespace-nowrap', compact ? 'text-[10px]' : 'text-[11px]')} style={{ borderColor: `${g.hex}66`, color: '#c9d1e8', background: 'rgba(10,12,22,.6)' }}>
           Yours
         </span>
       )}
@@ -1308,7 +1325,7 @@ function GalaxyLabel({
             {g.overdue > 0 && <span className="text-danger"> · {g.overdue} overdue</span>}
           </span>
           {g.total > 0 && (
-            <span className="mx-auto mt-1.5 block h-1 w-24 overflow-hidden rounded-full bg-white/10">
+            <span className={cx(auto, 'mt-1.5 block h-1 w-24 overflow-hidden rounded-full bg-white/10')}>
               <span className="block h-full rounded-full" style={{ width: `${pct}%`, background: g.hex }} />
             </span>
           )}

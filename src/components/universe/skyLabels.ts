@@ -123,7 +123,8 @@ export function layoutSky(p: {
             id: t.id,
             x: sx + sl.x * k,
             y: sy + sl.y * k,
-            r: d / 2 + 5,
+            // the selected planet wears brackets out to d/2 + 15: its name keeps clear of them
+            r: d / 2 + (t.id === p.selectedTask ? 15 : 5),
             text: t.title,
             rank: (t.status === 'done' ? 0 : 10) + (tv.active ? 8 : 0) + (late ? 5 : 0) + t.priority,
             force: t.id === p.selectedTask,
@@ -140,7 +141,7 @@ export function layoutSky(p: {
           id: it.id,
           x: sx + sl.x * k,
           y: sy + sl.y * k,
-          r: d / 2 + 5,
+          r: d / 2 + (it.id === p.selectedTask ? 15 : 5),
           // its `sub` too, close up
           text: it.sub && k >= ITEM_SUB_ZOOM ? `${it.title} · ${it.sub}` : it.title,
           // the live and big first; ghosts and the gone last

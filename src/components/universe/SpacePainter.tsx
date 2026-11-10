@@ -50,7 +50,10 @@ export function SpacePainter({
   arrowFocus,
   galaxyBoxes,
   hosted = false,
+  selectedPlanet = null,
 }: {
+  /** The selected task or item (its moons keep clear of its brackets). */
+  selectedPlanet?: string | null;
   /** Hosted: ORBIT's own galaxies get a thin solid rim (the host's have the dashed survey ring). */
   hosted?: boolean;
   /** Where each galaxy's words are at universe level (a cluster's outline goes round them). */
@@ -348,6 +351,13 @@ export function SpacePainter({
           });
         }
         if (layers.moons && k >= LOD.planets) {
+          // the selected planet's brackets, which no other planet's "+n" may sit on
+          let keep: { x: number; y: number; r: number } | undefined;
+          const nT = s.pv.tasks.length;
+          const ti = s.pv.tasks.findIndex((tv) => tv.task.id === selectedPlanet);
+          const ii = (s.pv.items ?? []).findIndex((iv) => iv.item.id === selectedPlanet);
+          const ks = ti >= 0 ? s.slots[ti] : ii >= 0 ? s.slots[nT + ii] : undefined;
+          if (ks) keep = { x: sx + ks.x * k, y: sy + ks.y * k, r: (clamp(ks.d * k, 14, 64) / 2 + 14) * 1.42 + 3 };
           s.pv.tasks.forEach((tv, i) => {
             const sl = s.slots[i];
             if (!sl || !tv.moons) return;
@@ -355,7 +365,7 @@ export function SpacePainter({
             const lab = planetLabels?.get(tv.task.id);
             // the arc sits away from the planet's name; with no name shown, on the side facing the star
             const away = lab?.shown ? AWAY[lab.side] : Math.atan2(-sl.y, -sl.x);
-            drawMoons(g, tv.moons, families, sx + sl.x * k, sy + sl.y * k, d, k, away, (dim && !tv.matches ? 0.3 : 1) * sDim);
+            drawMoons(g, tv.moons, families, sx + sl.x * k, sy + sl.y * k, d, k, away, (dim && !tv.matches ? 0.3 : 1) * sDim, tv.task.id === selectedPlanet, tv.task.id === selectedPlanet ? undefined : keep);
           });
           const nt = s.pv.tasks.length;
           (s.pv.items ?? []).forEach((iv, j) => {
@@ -364,7 +374,7 @@ export function SpacePainter({
             const d = clamp(sl.d * k, 14, 64);
             const lab = planetLabels?.get(iv.item.id);
             const away = lab?.shown ? AWAY[lab.side] : Math.atan2(-sl.y, -sl.x);
-            drawMoons(g, iv.item.moons, families, sx + sl.x * k, sy + sl.y * k, d, k, away, (dim && !iv.matches ? 0.3 : 1) * sDim * (iv.item.ghost ? 0.5 : 1));
+            drawMoons(g, iv.item.moons, families, sx + sl.x * k, sy + sl.y * k, d, k, away, (dim && !iv.matches ? 0.3 : 1) * sDim * (iv.item.ghost ? 0.5 : 1), iv.item.id === selectedPlanet, iv.item.id === selectedPlanet ? undefined : keep);
           });
         }
       }
@@ -684,11 +694,12 @@ function drawDatesCount(g: CanvasRenderingContext2D, beacons: Beacon[], x: numbe
 }
 
 /** Moons on a planet: one dot per attachment, coloured by family; at most five, then "+n". */
-function drawMoons(g: CanvasRenderingContext2D, set: MoonSet, families: Record<string, Family>, px: number, py: number, d: number, k: number, mid: number, alpha: number) {
+function drawMoons(g: CanvasRenderingContext2D, set: MoonSet, families: Record<string, Family>, px: number, py: number, d: number, k: number, mid: number, alpha: number, selected = false, keepOut?: { x: number; y: number; r: number }) {
   const shown = set.items.slice(0, CLUTTER.moons);
   const extra = set.items.length - shown.length + set.more;
   if (!shown.length && !extra) return;
-  const orbit = d / 2 + 9;
+  // the selected planet wears brackets out to d/2 + 15: its moons ride outside them
+  const orbit = d / 2 + (selected ? 22 : 9);
   const mr = clamp(1.6 + k * 1.2, 2.2, 4);
   const step = (mr * 2 + 3.5) / orbit;
   // the arc is centred on `mid` (away from the planet's name)
@@ -738,8 +749,15 @@ function drawMoons(g: CanvasRenderingContext2D, set: MoonSet, families: Record<s
     g.font = `700 12px ${FONT}`;
     const w = g.measureText(label).width + 10;
     g.restore();
-    const cx = px + Math.cos(a) * (orbit + 4 + w / 2);
-    const cy = py + Math.sin(a) * (orbit + 4 + 8);
+    // (the selected planet's pill also clears the corners of its brackets)
+    const reach = selected ? (d / 2 + 14) * 1.42 + 4 : orbit + 4;
+    const at = (ang: number) => ({ x: px + Math.cos(ang) * (reach + w / 2), y: py + Math.sin(ang) * (reach + 8) });
+    // never on another planet's selection brackets: the other side of its planet, or left out
+    const hits = (q: { x: number; y: number }) => !!keepOut && Math.hypot(q.x - keepOut.x, q.y - keepOut.y) < keepOut.r + w / 2 + 2;
+    let spot = at(a);
+    if (hits(spot)) spot = at(a + Math.PI);
+    if (hits(spot)) return;
+    const { x: cx, y: cy } = spot;
     g.save();
     g.globalAlpha = alpha;
     g.fillStyle = 'rgba(8,10,20,0.88)';

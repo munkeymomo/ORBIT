@@ -226,3 +226,15 @@ describe('the level of the view', () => {
     }
   });
 });
+
+describe('the selected planet\'s own words', () => {
+  it('the moon list is never put where the selected planet\'s name is', () => {
+    const name = { x: 180, y: 330, w: 110, h: 28 };
+    const base = { sx: 600, sy: 420, py: 340, outer: 200, canvasW: 1180, canvasH: 820, top: 76, w: 230, h: 90 };
+    const free = outsideSystem(base)!;
+    expect(overlaps(free.box, name, 4)).toBe(true); // right of the system, where the name hangs
+    const moved = outsideSystem({ ...base, avoid: [name] });
+    expect(moved === null || !overlaps(moved.box, name, 4)).toBe(true);
+    expect(moved?.box).not.toEqual(free.box);
+  });
+});
