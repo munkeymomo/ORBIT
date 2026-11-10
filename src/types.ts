@@ -54,6 +54,8 @@ export interface HostRef {
   finished?: boolean;
   /** A task done without being done: shown struck through. */
   dropped?: boolean;
+  /** A task ORBIT has asked the host to create, not yet answered (its id is ORBIT's temporary one). */
+  pending?: boolean;
   cluster?: string;
   /** How many things a system stands for, when its planets are only some of them. */
   count?: number;
@@ -116,7 +118,7 @@ export interface Placement {
   updatedAt: number;
 }
 
-/** ORBIT's own working state for a task a host owns (id = the host's task id). Nothing writes it yet. */
+/** ORBIT's own working state for a task a host owns (id = the host's task id). See src/host/work.ts. */
 export interface TaskWork {
   id: ID;
   parked?: boolean;

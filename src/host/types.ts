@@ -244,12 +244,29 @@ export interface Verse {
   arrows?: Arrow[];
 }
 
-/** The fields of a task a host may let ORBIT change (later stages). */
+/** The fields of a task a host may let ORBIT change. */
 export interface TaskFields {
   title: string;
   notes: string;
   priority: Priority;
   due: Day | null;
+}
+
+/**
+ * Changes to host-owned tasks (PROTOCOL.md, "Changing host tasks"). Each resolves with the task as the host now
+ * has it, or rejects with an Error whose message is the reason shown to the person.
+ */
+export interface HostTasks {
+  /** A new task in a system whose caps allow `create`. ORBIT sends `priority` always, `notes` and `due` when set. */
+  create(fields: Partial<TaskFields> & { title: string; system: string }): Promise<Planet>;
+  /** Only the fields that changed. `system` when the task moves to another system (caps `move`). */
+  update(id: string, patch: Partial<TaskFields> & { system?: string }): Promise<Planet>;
+  /** `reason` is sent when the person gave one (always for `dropped` when the task's caps.reason has `drop`). */
+  setStatus(id: string, status: 'todo' | 'done' | 'dropped', reason?: string): Promise<Planet>;
+  /** `reason` is '' when the task's caps.reason does not have `delete`. */
+  remove(id: string, reason: string): Promise<void>;
+  /** Takes an attachment off: `link` is the attachment's `link`. */
+  detach(id: string, link: string): Promise<void>;
 }
 
 /** What a host puts on `window.orbitHost` (see PROTOCOL.md). */
@@ -263,13 +280,7 @@ export interface OrbitHost {
   /** Where ORBIT keeps what is its own (positions, preferences, later working state and personal records). */
   store: StorageAdapter;
   /** Changes to host-owned tasks. A refusal rejects with an Error whose message is the reason shown. */
-  tasks?: {
-    create(fields: Partial<TaskFields> & { title: string; system: string }): Promise<Planet>;
-    update(id: string, patch: Partial<TaskFields> & { system?: string }): Promise<Planet>;
-    setStatus(id: string, status: 'todo' | 'done' | 'dropped'): Promise<Planet>;
-    remove(id: string, reason: string): Promise<void>;
-    detach(id: string, link: string): Promise<void>;
-  };
+  tasks?: HostTasks;
   /** The host shows a picker of its own and attaches what was chosen. Resolves when done (true = changed). */
   pick?(family: string, ctx: { planet?: string; system?: string; galaxy?: string }): Promise<boolean>;
   /** Anything else the host does in a dialog of its own. */
