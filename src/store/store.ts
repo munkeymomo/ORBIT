@@ -379,6 +379,7 @@ export function createOrbitStore(deps: StoreDeps = {}): StoreApi<OrbitState> {
       current: (id) => get().tasks.find((t) => t.id === id),
       revise: (id, patch) => set({ tasks: get().tasks.map((t) => (t.id === id ? { ...t, ...patch } : t)) }),
       refused: (reason) => sayOnce(reason),
+      statusSettled: (id, accepted) => statusSettled(id, accepted),
       adopt: (id, planet, settled) => {
         const cur = get().tasks.find((t) => t.id === id);
         if (!cur?.host) return;
@@ -573,6 +574,28 @@ export function createOrbitStore(deps: StoreDeps = {}): StoreApi<OrbitState> {
       }
       setFocusRt(null);
       return rt;
+    };
+
+    /**
+     * A host task is completed or dropped: the focus session on it ends at once (the screen shows the change), but
+     * the host may refuse. What the session was is kept until the host answers; a refusal puts it back.
+     */
+    const endedFor = new Map<string, { rt: FocusRuntime; session: FocusSession | undefined; cycle: number; lastFocusEnd: OrbitState['lastFocusEnd'] }>();
+    const endFocusOn = (id: string, reason: SessionEndReason, hostOwned: boolean) => {
+      const rt = get().focus;
+      if (!rt || rt.taskId !== id) return;
+      if (hostOwned) endedFor.set(id, { rt, session: get().sessions.find((x) => x.id === rt.sessionId), cycle: get().cycle, lastFocusEnd: get().lastFocusEnd });
+      endSession(reason);
+    };
+    const statusSettled = (id: string, accepted: boolean) => {
+      const was = endedFor.get(id);
+      endedFor.delete(id);
+      if (accepted || !was || get().focus) return; // accepted, nothing to put back, or something else is live now
+      const t = get().tasks.find((x) => x.id === id);
+      if (!t || t.status === 'done') return;
+      if (was.session) patchRow('sessions', was.session.id, { endedAt: was.session.endedAt, activeMs: was.session.activeMs, endReason: was.session.endReason });
+      set({ cycle: was.cycle, lastFocusEnd: was.lastFocusEnd });
+      setFocusRt(was.rt);
     };
 
     const beginSession = (o: { taskId: string | null; kind: SessionKind; mode: TimerMode; plannedMs: number | null; baseMs?: number; fromCheckpointId?: string | null }) => {
@@ -1497,7 +1520,7 @@ export function createOrbitStore(deps: StoreDeps = {}): StoreApi<OrbitState> {
         const task = get().tasks.find((t) => t.id === id);
         if (!task) return;
         if (task.host && !may(can(), task.host, 'status')) return refuse(refusal.kept(can()), task.host.open);
-        if (get().focus?.taskId === id) endSession('completed');
+        endFocusOn(id, 'completed', !!task.host);
         patchRow('tasks', id, { status: 'done', completedAt: now(), parkedAt: null, progress: 100, ...(task.host ? { host: { ...task.host, dropped: false } } : {}) });
         get().toast({
           tone: 'success',
@@ -1515,7 +1538,7 @@ export function createOrbitStore(deps: StoreDeps = {}): StoreApi<OrbitState> {
         if (!task?.host) return;
         if (!may(can(), task.host, 'status')) return refuse(refusal.kept(can()), task.host.open);
         if (needsReason(task.host, 'drop') && !reason?.trim()) return refuse(refusal.reason(can(), 'drop'));
-        if (get().focus?.taskId === id) endSession('stopped');
+        endFocusOn(id, 'stopped', true);
         patchRow('tasks', id, { status: 'done', completedAt: now(), parkedAt: null, host: { ...task.host, dropped: true } }, { reason: reason?.trim() || undefined });
         get().toast({ text: `Dropped “${task.title}”.`, action: { label: 'Undo', run: () => get().reopenTask(id) } });
       },

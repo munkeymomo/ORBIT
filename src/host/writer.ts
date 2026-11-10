@@ -68,6 +68,8 @@ export interface HostedWriting {
   revise: (id: string, patch: Partial<Task>) => void;
   /** A change was refused: show the reason. */
   refused: (reason: string) => void;
+  /** The host has answered a status change (done, dropped, reopened): accepted or not. */
+  statusSettled?: (id: string, accepted: boolean) => void;
   /** The host accepted a change and returned the task. `settled`: no later change to it is waiting. */
   adopt: (id: string, planet: Planet, settled: boolean) => void;
   /** The host created the task that was on screen under `tempId`. */
@@ -257,9 +259,11 @@ export function createRecordWriter(ctx: () => WriterContext): RecordWriter {
         if (!api || !h.abilities.write) throw new Error(kept);
         const planet = opts.reason !== undefined ? await api.setStatus(rid, want.status, opts.reason) : await api.setStatus(rid, want.status);
         await accept(a, h, rid, planet, settled());
+        h.statusSettled?.(rid, true);
       } catch (e) {
         await revertStatus(a, h, rid, sent, before);
         h.refused(message(e, kept));
+        h.statusSettled?.(rid, false);
       }
     }
   };

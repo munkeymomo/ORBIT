@@ -603,3 +603,46 @@ describe('locked, refresh, linked items', () => {
     expect(h.task('t-other')).toBeTruthy();
   });
 });
+
+describe('a refused completion keeps the focus session', () => {
+  it('complete: refused puts the session back, accepted ends it', async () => {
+    const h = await editable();
+    h.s().startFocus({ taskId: 't-compost' });
+    const sid = h.s().focus!.sessionId;
+    h.host.refuseNext('Not before the inspection.');
+    h.s().completeTask('t-compost');
+    expect(h.s().focus).toBeNull();
+    await h.settle();
+    expect(h.task('t-compost')!.status).toBe('todo');
+    expect(h.s().focus?.taskId).toBe('t-compost');
+    expect(h.s().focus?.sessionId).toBe(sid);
+    expect(h.s().sessions.find((x) => x.id === sid)).toMatchObject({ endedAt: null, endReason: null });
+    expect((await h.saved()).focus?.sessionId).toBe(sid);
+    // now the host accepts
+    h.s().completeTask('t-compost');
+    await h.settle();
+    expect(h.s().focus).toBeNull();
+    expect(h.s().sessions.find((x) => x.id === sid)).toMatchObject({ endReason: 'completed' });
+  });
+
+  it('drop: refused puts the session back', async () => {
+    const h = await editable();
+    h.s().startFocus({ taskId: 't-compost' });
+    h.host.refuseNext('Not now.');
+    h.s().dropTask('t-compost', 'Rained off');
+    expect(h.s().focus).toBeNull();
+    await h.settle();
+    expect(h.s().focus?.taskId).toBe('t-compost');
+  });
+
+  it('delete: the session is untouched until the host accepts, kept when refused', async () => {
+    const h = await editable();
+    h.s().startFocus({ taskId: 't-compost' });
+    h.host.refuseNext('Kept for the audit.');
+    h.s().deleteTask('t-compost', 'Not needed');
+    expect(h.s().focus?.taskId).toBe('t-compost');
+    await h.settle();
+    expect(h.task('t-compost')).toBeTruthy();
+    expect(h.s().focus?.taskId).toBe('t-compost');
+  });
+});
