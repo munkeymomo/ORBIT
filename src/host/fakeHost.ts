@@ -1,25 +1,40 @@
 /**
- * A host that lives in memory, for ORBIT's own tests and for demos (`?orbit-host=demo`). Its records are
- * invented: a garden, a house move, a workshop and a small bakery. It covers every shape protocol 1 can send in
- * the read-only stage: a cluster of galaxies, a finished and a virtual galaxy, deep space, a virtual system, a
- * system with a note, tasks at every priority (overdue, done, dropped), moons in all three states and several
- * families (one planet with more than five, one with `more`), a small belt and a large one, beacons in all five
- * states on a galaxy rim and beside systems, and one busy system with more than forty open tasks.
+ * A host that lives in memory, for ORBIT's own tests and for demos. Its records are invented: a garden, a house
+ * move, a workshop and a small bakery. It covers every shape protocol 1 can send: a cluster of galaxies, a
+ * finished and a virtual galaxy, deep space, a virtual system, a system with a note, tasks at every priority
+ * (overdue, done, dropped), moons in all three states and several families (one planet with more than five,
+ * one with `more`), a small belt and a large one, beacons in all five states on a galaxy rim and beside
+ * systems, and one busy system with more than forty open tasks.
  *
- * Every capability is false: ORBIT can look, move things around and open them in the host, nothing else.
+ * Read-only by default (every capability false): ORBIT can look, move things around and open them in the host.
+ * With `editable` (the demo at `?orbit-host=demo`) it offers `write`, `work` and `pick`, per-record caps, and a
+ * working `tasks` API, with switches to refuse changes (`refuseNext`, `refuseAlways`, `setLocked`). One task,
+ * "Fix the roof vent", always refuses changes to its fields; "Return the spare keys" may not be changed at all.
  */
 import { MemoryAdapter } from '../data/storage';
 import { addDays, toDateKey } from '../lib/util';
-import type { Attachment, Beacon, Collection, Galaxy, Handshake, OrbitHost, Planet, System, Unchanged, Verse } from './types';
+import type { Attachment, Beacon, Caps, Collection, Galaxy, Handshake, HostTasks, OrbitHost, Planet, System, Unchanged, Verse } from './types';
 
 export interface FakeHost extends OrbitHost {
   store: MemoryAdapter;
   /** Every target ORBIT asked the host to open. */
   opened: { kind: string; id: string }[];
-  /** How often verse() was asked, and how often it answered "unchanged". */
-  calls: { verse: number; unchanged: number };
+  /** How often verse() and handshake() were asked, and how often verse() answered "unchanged". */
+  calls: { verse: number; unchanged: number; handshake: number };
+  /** Every call ORBIT made to `tasks`, `pick` and `action`, in order (editable only). */
+  log: { op: string; args: unknown[] }[];
   /** Changes the verse (and its rev), as the host would after an edit of its own. */
   change(fn: (v: Verse) => void): void;
+  /** The verse as the host has it now. */
+  current(): Verse;
+  /** The next change ORBIT asks for is refused with this reason. */
+  refuseNext(reason: string): void;
+  /** Every change to this task is refused with this reason (undefined: stop refusing). */
+  refuseAlways(taskId: string, reason?: string): void;
+  /** While set, the handshake says `locked` and every change is refused with this text. */
+  setLocked(text?: string): void;
+  /** Answers to tasks calls wait this long (ms), so a test or a demo can see a change waiting. */
+  delay: number;
 }
 
 export interface FakeHostOptions {
@@ -27,6 +42,14 @@ export interface FakeHostOptions {
   /** Offer a different protocol number (to test refusal). */
   protocol?: number;
   name?: string;
+  /** Offer write, work and pick, with per-record caps and a working tasks API. */
+  editable?: boolean;
+  /** Keep the verse and the store here between page loads (the demo uses sessionStorage). */
+  storage?: Storage | null;
+  /** Refuse the first change with this reason. */
+  refuse?: string;
+  /** Start locked with this text. */
+  locked?: string;
 }
 
 const FAMILIES = {
@@ -48,6 +71,7 @@ export function demoVerse(now = Date.now()): Verse {
     family,
     label,
     state: 'live',
+    link: `l-${id}`,
     open: open(family, id),
     ...extra,
   });
@@ -175,26 +199,183 @@ export function demoVerse(now = Date.now()): Verse {
   };
 }
 
+const TASK_CAPS: Caps = { edit: true, status: true, move: true, delete: true, attach: true, reason: ['delete', 'drop'] };
+const STORAGE_KEY = 'orbit-demo-host';
+
+/** Per-record caps for the editable demo (added to a fresh verse). */
+export function editableVerse(v: Verse): Verse {
+  const noNew = new Set(['s-nowhere', 's-keys']);
+  for (const s of v.systems) s.caps = noNew.has(s.id) ? {} : { create: true };
+  for (const p of v.planets) if (p.type === 'task') p.caps = p.id === 't-keys' ? {} : { ...TASK_CAPS, reason: [...TASK_CAPS.reason!] };
+  return v;
+}
+
 export function createFakeHost(opts: FakeHostOptions = {}): FakeHost {
-  let current = demoVerse(opts.now);
-  let rev = 1;
+  const editable = !!opts.editable;
+  const storage = opts.storage ?? null;
+  const saved = (() => {
+    try {
+      const raw = storage?.getItem(STORAGE_KEY);
+      return raw ? (JSON.parse(raw) as { verse: Verse; rev: number; seq: number; store: ConstructorParameters<typeof MemoryAdapter>[0] }) : null;
+    } catch {
+      return null;
+    }
+  })();
+  let current = saved?.verse ?? (editable ? editableVerse(demoVerse(opts.now)) : demoVerse(opts.now));
+  let rev = saved?.rev ?? 1;
+  let seq = saved?.seq ?? 0;
+  let locked = opts.locked || undefined;
+  let refuseNext: string | null = opts.refuse || null;
+  const refuseFor = new Map<string, string>();
   const name = opts.name ?? 'Demo host';
   const protocol = opts.protocol ?? 1;
   const info: Handshake = {
     protocol,
     host: { name, version: '1.0' },
-    caps: { write: false, personal: false, work: false },
-    verses: [{ id: 'main', name: 'Everything', plain: 'tasks', legend: 'Size: open work · ring: share done · moons: what a task uses', editable: false }],
+    caps: editable ? { write: true, personal: false, work: true, pick: ['tool', 'doc'] } : { write: false, personal: false, work: false },
+    verses: [{ id: 'main', name: 'Everything', plain: 'tasks', legend: 'Size: open work · ring: share done · moons: what a task uses', editable }],
     start: 'main',
     labels: { stored: `Kept by ${name}` },
   };
+  const store = new MemoryAdapter(saved?.store ?? undefined);
+
+  const persist = () => {
+    if (!storage) return;
+    void store.load().then((snap) => {
+      try {
+        storage.setItem(STORAGE_KEY, JSON.stringify({ verse: current, rev, seq, store: snap }));
+      } catch {
+        /* full or blocked: the demo forgets on reload */
+      }
+    });
+  };
+  if (storage) {
+    // every write to the store is kept for the next page load
+    for (const k of ['put', 'bulkPut', 'remove', 'setPrefs', 'setFocus', 'replaceAll'] as const) {
+      const orig = (store[k] as (...a: unknown[]) => Promise<void>).bind(store);
+      (store as unknown as Record<string, unknown>)[k] = async (...a: unknown[]) => {
+        await orig(...a);
+        persist();
+      };
+    }
+  }
+
+  const bump = () => {
+    current = { ...current, rev: String(++rev) };
+    persist();
+  };
+  const planet = (id: string) => {
+    const p = current.planets.find((x) => x.id === id && x.type === 'task');
+    if (!p) throw new Error('That task is no longer here.');
+    return p;
+  };
+  const wait = () => (host.delay > 0 ? new Promise((r) => setTimeout(r, host.delay)) : Promise.resolve());
+  /** Refusals that apply to every change, in this order. */
+  const gate = async (op: string, args: unknown[], id?: string) => {
+    host.log.push({ op, args: structuredClone(args) });
+    await wait();
+    if (locked) throw new Error(locked);
+    if (refuseNext) {
+      const r = refuseNext;
+      refuseNext = null;
+      throw new Error(r);
+    }
+    if (id && refuseFor.has(id)) throw new Error(refuseFor.get(id)!);
+  };
+  const out = (p: Planet) => structuredClone(p);
+
+  const tasks: HostTasks = {
+    async create(fields) {
+      await gate('create', [fields]);
+      const sys = current.systems.find((s) => s.id === fields.system);
+      if (!sys?.caps?.create) throw new Error(`${name} does not take new tasks in that system.`);
+      if (!fields.title?.trim()) throw new Error('A task needs a title.');
+      const at = Date.now();
+      const p: Planet = {
+        id: `t-made-${++seq}`,
+        system: sys.id,
+        type: 'task',
+        title: fields.title.trim(),
+        notes: fields.notes ?? '',
+        status: 'todo',
+        priority: fields.priority ?? 2,
+        due: fields.due ?? null,
+        createdAt: at,
+        updatedAt: at,
+        caps: { ...TASK_CAPS, reason: [...TASK_CAPS.reason!] },
+        open: { kind: 'task', id: `t-made-${seq}` },
+      };
+      current.planets.push(p);
+      bump();
+      return out(p);
+    },
+    async update(id, patch) {
+      await gate('update', [id, patch], id);
+      const p = planet(id);
+      if (!p.caps?.edit) throw new Error(`${name} does not let this task be changed.`);
+      if (id === 't-vent') throw new Error('The roof vent is waiting for a survey; it cannot be changed yet.');
+      if (patch.system !== undefined && patch.system !== p.system) {
+        const to = current.systems.find((s) => s.id === patch.system);
+        if (!p.caps.move) throw new Error(`${name} does not let this task move.`);
+        if (!to?.caps?.create) throw new Error(`${name} does not take tasks in that system.`);
+        p.system = to.id;
+      }
+      if (patch.title !== undefined) {
+        if (!patch.title.trim()) throw new Error('A task needs a title.');
+        p.title = patch.title.trim();
+      }
+      if (patch.notes !== undefined) p.notes = patch.notes;
+      if (patch.priority !== undefined) p.priority = patch.priority;
+      if (patch.due !== undefined) p.due = patch.due;
+      p.updatedAt = Date.now();
+      bump();
+      return out(p);
+    },
+    async setStatus(id, status, reason) {
+      await gate('setStatus', reason === undefined ? [id, status] : [id, status, reason], id);
+      const p = planet(id);
+      if (!p.caps?.status) throw new Error(`${name} does not let this task be completed or reopened.`);
+      if (status === 'dropped' && p.caps.reason?.includes('drop') && !reason?.trim()) throw new Error('A reason is needed to drop this task.');
+      p.status = status === 'todo' ? 'todo' : 'done';
+      p.dropped = status === 'dropped';
+      p.completedAt = status === 'todo' ? null : Date.now();
+      if (status === 'dropped') p.note = `Dropped: ${reason ?? ''}`.trim();
+      else delete p.note;
+      p.updatedAt = Date.now();
+      bump();
+      return out(p);
+    },
+    async remove(id, reason) {
+      await gate('remove', [id, reason], id);
+      const p = planet(id);
+      if (!p.caps?.delete) throw new Error(`${name} does not let this task be deleted.`);
+      if (p.caps.reason?.includes('delete') && !reason.trim()) throw new Error('A reason is needed to delete this task.');
+      current.planets = current.planets.filter((x) => x.id !== id);
+      bump();
+    },
+    async detach(id, link) {
+      await gate('detach', [id, link], id);
+      const p = planet(id);
+      if (!p.caps?.attach) throw new Error(`${name} does not let this task's links change.`);
+      const before = p.attachments?.length ?? 0;
+      p.attachments = (p.attachments ?? []).filter((a) => a.link !== link);
+      if (p.attachments.length === before) throw new Error('That link is already gone.');
+      bump();
+    },
+  };
+
   const host: FakeHost = {
     protocol,
-    store: new MemoryAdapter(),
+    store,
     opened: [],
-    calls: { verse: 0, unchanged: 0 },
+    calls: { verse: 0, unchanged: 0, handshake: 0 },
+    log: [],
+    delay: 0,
     async handshake() {
-      return structuredClone(info);
+      host.calls.handshake++;
+      const h = structuredClone(info);
+      if (locked) h.locked = locked;
+      return h;
     },
     async verse(id: string, since?: string): Promise<Verse | Unchanged> {
       host.calls.verse++;
@@ -210,8 +391,33 @@ export function createFakeHost(opts: FakeHostOptions = {}): FakeHost {
     },
     change(fn) {
       fn(current);
-      current = { ...current, rev: String(++rev) };
+      bump();
+    },
+    current: () => current,
+    refuseNext(reason) {
+      refuseNext = reason;
+    },
+    refuseAlways(taskId, reason) {
+      if (reason) refuseFor.set(taskId, reason);
+      else refuseFor.delete(taskId);
+    },
+    setLocked(text) {
+      locked = text || undefined;
     },
   };
+  if (editable) {
+    host.tasks = tasks;
+    host.pick = async (family, ctx) => {
+      host.log.push({ op: 'pick', args: [family, structuredClone(ctx)] });
+      // the host's own picker: in the demo it "chooses" a new item of the family at once
+      const p = ctx.planet ? current.planets.find((x) => x.id === ctx.planet) : undefined;
+      if (!p) return false;
+      const n = ++seq;
+      const label = `${(FAMILIES as Record<string, { label: string }>)[family]?.label ?? family} pick ${n}`;
+      (p.attachments ??= []).push({ id: `a-pick-${n}`, link: `l-pick-${n}`, kind: family, family, label, state: 'live' });
+      bump();
+      return true;
+    };
+  }
   return host;
 }

@@ -4,7 +4,10 @@
  * speaks another protocol, or does not answer, is refused with a reason ORBIT shows on screen, and ORBIT then
  * runs on its own, in memory.
  *
- * `?orbit-host=demo` in the address installs the built-in demo host first (for demos, tests and e2e).
+ * `?orbit-host=demo` in the address installs the built-in demo host first (for demos, tests and e2e): an
+ * editable one whose records and store last for the browser tab (sessionStorage, the demo host's own; ORBIT
+ * itself still touches no browser storage). `?orbit-host=demo-readonly` installs the read-only one. With the
+ * editable demo, `&refuse=<reason>` refuses the first change and `&locked=<text>` starts it locked.
  */
 import { HOST_PROTOCOL, type Handshake, type OrbitHost } from './types';
 
@@ -15,13 +18,22 @@ export type Detection =
 
 type HostWindow = Window & { orbitHost?: OrbitHost };
 
-/** The demo switch in the address, if any. */
-export function demoRequested(win: Window = window): boolean {
+const params = (win: Window) => {
   try {
-    return new URLSearchParams(win.location.search).get('orbit-host') === 'demo';
+    return new URLSearchParams(win.location.search);
   } catch {
-    return false;
+    return new URLSearchParams();
   }
+};
+
+/** The demo switch in the address, if any. */
+export function demoMode(win: Window = window): 'editable' | 'readonly' | null {
+  const v = params(win).get('orbit-host');
+  return v === 'demo' ? 'editable' : v === 'demo-readonly' ? 'readonly' : null;
+}
+
+export function demoRequested(win: Window = window): boolean {
+  return demoMode(win) !== null;
 }
 
 /** `window.orbitHost`, else the parent frame's (guarded: reading a cross-origin parent throws). */
@@ -53,7 +65,15 @@ export async function detectHost(win: Window = window, opts: { timeoutMs?: numbe
   if (demoRequested(win) && !(win as HostWindow).orbitHost) {
     try {
       const { createFakeHost } = await import('./fakeHost');
-      (win as HostWindow).orbitHost = createFakeHost();
+      const editable = demoMode(win) === 'editable';
+      const p = params(win);
+      let storage: Storage | null = null;
+      try {
+        storage = editable ? win.sessionStorage : null;
+      } catch {
+        /* blocked: the demo forgets on reload */
+      }
+      (win as HostWindow).orbitHost = createFakeHost({ editable, storage, refuse: p.get('refuse') ?? undefined, locked: p.get('locked') ?? undefined });
     } catch (e) {
       return refused(`The demo host could not start: ${e instanceof Error ? e.message : String(e)}`);
     }
