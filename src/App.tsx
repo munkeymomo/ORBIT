@@ -11,7 +11,7 @@ import { Toasts } from './components/shell/Toasts';
 import { ConfirmDialog } from './components/shell/ConfirmDialog';
 import { ShortcutsHelp } from './components/shell/ShortcutsHelp';
 import { SearchPalette } from './components/shell/SearchPalette';
-import { StorageBanner } from './components/shell/StorageBanner';
+import { LockedBanner, StorageBanner } from './components/shell/StorageBanner';
 import { Dock } from './components/dock/Dock';
 import { MobileDock } from './components/dock/MobileDock';
 import { DetailPanel } from './components/task/DetailPanel';
@@ -196,6 +196,7 @@ export default function App() {
         {/* Embedded, the host shows its own header; search stays on / and in the Universe toolbar. */}
         {!hosted && <TopBar />}
         <StorageBanner />
+        <LockedBanner />
         <main id="main" className="relative min-h-0 flex-1 overflow-hidden">
           <CurrentView />
         </main>

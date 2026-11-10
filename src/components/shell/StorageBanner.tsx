@@ -1,6 +1,22 @@
 import { useState } from 'react';
-import { HardDrive, RefreshCw, X } from 'lucide-react';
+import { HardDrive, Lock, RefreshCw, X } from 'lucide-react';
 import { useOrbit } from '../../store/store';
+import { useAbilities } from '../../host/useAbilities';
+
+/** Across the top while the host refuses changes to its records (handshake.locked); its text says why. */
+export function LockedBanner() {
+  const can = useAbilities();
+  if (!can.locked) return null;
+  return (
+    <div role="status" aria-label="Changes paused" className="flex items-start gap-3 border-b border-line bg-surface-2 px-4 py-2.5 text-[13px] text-text md:px-6">
+      <Lock size={15} className="mt-0.5 shrink-0 text-amber" />
+      <p className="flex-1 leading-snug">
+        <span className="font-semibold">{can.locked}</span>
+        {can.work && <span className="text-muted"> Focus, parking and day plans still work; changes to {can.name}’s records wait until it allows them.</span>}
+      </p>
+    </div>
+  );
+}
 
 /** Shown only when ORBIT cannot keep data as it normally would: we never pretend data is being kept. */
 export function StorageBanner() {
