@@ -10,10 +10,11 @@
  * With `editable` (the demo at `?orbit-host=demo`) it offers `write`, `work` and `pick`, per-record caps, and a
  * working `tasks` API, with switches to refuse changes (`refuseNext`, `refuseAlways`, `setLocked`). One task,
  * "Fix the roof vent", always refuses changes to its fields; "Return the spare keys" may not be changed at all.
+ * With `personal` as well it keeps ORBIT's own records (caps.personal) and takes ORBIT's systems (`adopt`).
  */
 import { MemoryAdapter } from '../data/storage';
 import { addDays, toDateKey } from '../lib/util';
-import type { Attachment, Beacon, Caps, Collection, Galaxy, Handshake, HostTasks, OrbitHost, Planet, System, Unchanged, Verse } from './types';
+import type { AdoptBatch, AdoptResult, Attachment, Beacon, Caps, Collection, Galaxy, Handshake, HostTasks, OrbitHost, Planet, System, Unchanged, Verse } from './types';
 
 export interface FakeHost extends OrbitHost {
   store: MemoryAdapter;
@@ -35,7 +36,12 @@ export interface FakeHost extends OrbitHost {
   setLocked(text?: string): void;
   /** Answers to tasks calls wait this long (ms), so a test or a demo can see a change waiting. */
   delay: number;
+  /** What the host's own "take these tasks" dialog does when ORBIT calls adopt() (with `personal`). */
+  adoptMode: AdoptMode;
 }
+
+/** all: takes every task · some: all but the last · cancel: the person cancels · fail: the host throws. */
+export type AdoptMode = 'all' | 'some' | 'cancel' | 'fail';
 
 export interface FakeHostOptions {
   now?: number;
@@ -50,6 +56,10 @@ export interface FakeHostOptions {
   refuse?: string;
   /** Start locked with this text. */
   locked?: string;
+  /** Editable only: also keep ORBIT's own galaxies, systems and tasks (caps.personal) and offer adopt(). */
+  personal?: boolean;
+  /** What adopt() does (default 'all'). */
+  adopt?: AdoptMode;
 }
 
 const FAMILIES = {
@@ -212,6 +222,7 @@ export function editableVerse(v: Verse): Verse {
 
 export function createFakeHost(opts: FakeHostOptions = {}): FakeHost {
   const editable = !!opts.editable;
+  const personal = editable && !!opts.personal;
   const storage = opts.storage ?? null;
   const saved = (() => {
     try {
@@ -232,7 +243,7 @@ export function createFakeHost(opts: FakeHostOptions = {}): FakeHost {
   const info: Handshake = {
     protocol,
     host: { name, version: '1.0' },
-    caps: editable ? { write: true, personal: false, work: true, pick: ['tool', 'doc'] } : { write: false, personal: false, work: false },
+    caps: editable ? { write: true, personal, work: true, pick: ['tool', 'doc'], ...(personal ? { adopt: true } : {}) } : { write: false, personal: false, work: false },
     verses: [{ id: 'main', name: 'Everything', plain: 'tasks', legend: 'Size: open work · ring: share done · moons: what a task uses', editable }],
     start: 'main',
     labels: { stored: `Kept by ${name}` },
@@ -371,6 +382,7 @@ export function createFakeHost(opts: FakeHostOptions = {}): FakeHost {
     calls: { verse: 0, unchanged: 0, handshake: 0 },
     log: [],
     delay: 0,
+    adoptMode: opts.adopt ?? 'all',
     async handshake() {
       host.calls.handshake++;
       const h = structuredClone(info);
@@ -405,6 +417,43 @@ export function createFakeHost(opts: FakeHostOptions = {}): FakeHost {
       locked = text || undefined;
     },
   };
+  if (personal) {
+    /* The host's own "take these tasks" dialog: in the demo it files them in a new system in the Workshop. */
+    host.adopt = async (batch: AdoptBatch): Promise<AdoptResult | null> => {
+      host.log.push({ op: 'adopt', args: [structuredClone(batch)] });
+      await wait();
+      if (locked) throw new Error(locked);
+      if (host.adoptMode === 'cancel') return null;
+      if (host.adoptMode === 'fail') throw new Error(`${name} could not take them just now.`);
+      const take = host.adoptMode === 'some' ? batch.tasks.slice(0, -1) : batch.tasks;
+      const map: Record<string, string> = {};
+      if (!take.length) return { map };
+      const sid = `s-taken-${++seq}`;
+      current.systems.push({ id: sid, galaxy: 'g-workshop', name: batch.name, code: `WS-${seq}`, caps: { create: true }, open: { kind: 'plan', id: sid } });
+      const at = Date.now();
+      for (const t of take) {
+        const id = `t-made-${++seq}`;
+        current.planets.push({
+          id,
+          system: sid,
+          type: 'task',
+          title: t.title,
+          notes: t.notes,
+          status: t.status,
+          priority: t.priority,
+          due: t.due,
+          completedAt: t.status === 'done' ? at : null,
+          createdAt: at,
+          updatedAt: at,
+          caps: { ...TASK_CAPS, reason: [...TASK_CAPS.reason!] },
+          open: { kind: 'task', id },
+        });
+        map[t.id] = id;
+      }
+      bump();
+      return { map };
+    };
+  }
   if (editable) {
     host.tasks = tasks;
     host.pick = async (family, ctx) => {

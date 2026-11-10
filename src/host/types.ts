@@ -74,6 +74,8 @@ export interface HostCaps {
   pick?: string[];
   /** Ids host.action() answers. */
   actions?: string[];
+  /** host.adopt() takes ORBIT's own systems ("Move to <host>…"). */
+  adopt?: boolean;
 }
 
 export interface Handshake {
@@ -269,6 +271,30 @@ export interface HostTasks {
   detach(id: string, link: string): Promise<void>;
 }
 
+/** One of ORBIT's own tasks, as it is offered to the host by `adopt()`. */
+export interface AdoptTask {
+  /** ORBIT's id for it (the key of the map the host answers with). */
+  id: string;
+  title: string;
+  notes: string;
+  due: Day | null;
+  priority: Priority;
+  /** ORBIT's parked is `todo`. */
+  status: 'todo' | 'done';
+}
+
+/** One of ORBIT's own systems, with its tasks, offered to the host ("Move to <host>…"). */
+export interface AdoptBatch {
+  /** The system's name. */
+  name: string;
+  tasks: AdoptTask[];
+}
+
+/** What the host took: ORBIT's task id → the host's planet id. Tasks missing from the map stay with ORBIT. */
+export interface AdoptResult {
+  map: Record<string, string>;
+}
+
 /** What a host puts on `window.orbitHost` (see PROTOCOL.md). */
 export interface OrbitHost {
   protocol: number;
@@ -277,7 +303,7 @@ export interface OrbitHost {
   verse(id: string, since?: string): Promise<Verse | Unchanged>;
   /** Show something on a page of the host's own. */
   open(target: { kind: string; id: string }): void;
-  /** Where ORBIT keeps what is its own (positions, preferences, later working state and personal records). */
+  /** Where ORBIT keeps what is its own (positions, preferences, working state and personal records). */
   store: StorageAdapter;
   /** Changes to host-owned tasks. A refusal rejects with an Error whose message is the reason shown. */
   tasks?: HostTasks;
@@ -285,6 +311,12 @@ export interface OrbitHost {
   pick?(family: string, ctx: { planet?: string; system?: string; galaxy?: string }): Promise<boolean>;
   /** Anything else the host does in a dialog of its own. */
   action?(id: string, ctx: Record<string, string>): Promise<boolean>;
+  /**
+   * Take one of ORBIT's own systems and its tasks (offered when `handshake.caps.adopt`). The host shows a dialog
+   * of its own (where to put them, what moves) and creates the tasks. Resolves `null` when the person cancels,
+   * otherwise with the tasks it took (all, some or none).
+   */
+  adopt?(batch: AdoptBatch): Promise<AdoptResult | null>;
 }
 
 export function isUnchanged(v: Verse | Unchanged): v is Unchanged {

@@ -101,10 +101,12 @@ describe('the editable fake host', () => {
     expect(check('planet', await host.tasks!.update('t-compost', { title: 'Turn it' }))).toEqual([]);
   });
 
-  it('this build supports write and work, not yet personal', async () => {
-    expect(BUILD_SUPPORTS).toEqual({ write: true, personal: false, work: true });
+  it('this build supports write, work, personal and adopt; the editable host without personal offers none of the last two', async () => {
+    expect(BUILD_SUPPORTS).toEqual({ write: true, personal: true, work: true, adopt: true });
     const a = abilities(await createFakeHost({ editable: true }).handshake());
-    expect([a.write, a.work, a.personal, a.capture]).toEqual([true, true, false, true]);
+    expect([a.write, a.work, a.personal, a.capture, a.adopt]).toEqual([true, true, false, true, false]);
+    const b = abilities(await createFakeHost({ editable: true, personal: true }).handshake());
+    expect([b.write, b.work, b.personal, b.capture, b.plans, b.adopt]).toEqual([true, true, true, true, true, true]);
   });
 });
 

@@ -7,7 +7,9 @@
  * `?orbit-host=demo` in the address installs the built-in demo host first (for demos, tests and e2e): an
  * editable one whose records and store last for the browser tab (sessionStorage, the demo host's own; ORBIT
  * itself still touches no browser storage). `?orbit-host=demo-readonly` installs the read-only one. With the
- * editable demo, `&refuse=<reason>` refuses the first change and `&locked=<text>` starts it locked.
+ * editable demo, `&refuse=<reason>` refuses the first change and `&locked=<text>` starts it locked; it keeps
+ * ORBIT's own records as well (`&personal=0` turns that off), and `&adopt=all|some|cancel|fail` decides what its
+ * "take these tasks" dialog does.
  */
 import { HOST_PROTOCOL, type Handshake, type OrbitHost } from './types';
 
@@ -73,7 +75,16 @@ export async function detectHost(win: Window = window, opts: { timeoutMs?: numbe
       } catch {
         /* blocked: the demo forgets on reload */
       }
-      (win as HostWindow).orbitHost = createFakeHost({ editable, storage, refuse: p.get('refuse') ?? undefined, locked: p.get('locked') ?? undefined });
+      const adopt = p.get('adopt');
+      (win as HostWindow).orbitHost = createFakeHost({
+        editable,
+        storage,
+        refuse: p.get('refuse') ?? undefined,
+        locked: p.get('locked') ?? undefined,
+        // the editable demo keeps ORBIT's own records too, unless `&personal=0`
+        personal: editable && p.get('personal') !== '0',
+        adopt: adopt === 'some' || adopt === 'cancel' || adopt === 'fail' ? adopt : 'all',
+      });
     } catch (e) {
       return refused(`The demo host could not start: ${e instanceof Error ? e.message : String(e)}`);
     }

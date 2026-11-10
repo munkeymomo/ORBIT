@@ -21,8 +21,8 @@ interface OrbitHost {
   verse(id: string, since?: string): Promise<Verse | Unchanged>;
   /** Show something on a page of the host's own. */
   open(target: { kind: string; id: string }): void;
-  /** Where ORBIT keeps what is its own (positions, preferences, working state, later personal records).
-      Same shape as ORBIT's StorageAdapter. */
+  /** Where ORBIT keeps what is its own (positions, preferences, working state, personal records).
+      Same shape as ORBIT's StorageAdapter; replaceAll must be atomic. */
   store: StorageAdapter;
   /** Changes to host-owned tasks. A refusal rejects with an Error whose message is the reason shown. */
   tasks?: {
@@ -41,6 +41,11 @@ interface OrbitHost {
   pick?(family: string, ctx: { planet?: string; system?: string; galaxy?: string }): Promise<boolean>;
   /** Anything else the host does in a dialog of its own. */
   action?(id: string, ctx: Record<string, string>): Promise<boolean>;
+  /** Take one of ORBIT's own systems and its tasks ("Move to <host>…"); see "Handing a system to the host". */
+  adopt?(batch: {
+    name: string;
+    tasks: Array<{ id: string; title: string; notes: string; due: string | null; priority: 1 | 2 | 3 | 4; status: 'todo' | 'done' }>;
+  }): Promise<{ map: Record<string, string> } | null>;
 }
 ```
 
@@ -108,3 +113,56 @@ ORBIT keeps their state in `store` (the same tables and keys as standalone ORBIT
 
 Without `caps.work` none of this is offered for host tasks and nothing of it is written. Backups, the example
 workspace and erasing stay unavailable while ORBIT keeps no personal records with the host (`caps.personal`).
+
+## ORBIT's own records (`caps.personal`)
+
+With `caps.personal`, ORBIT's own galaxies, systems and tasks live beside the host's, and everything that can be
+made in standalone ORBIT can be made here (new galaxy, system and task, capture and the inbox, Today, focus,
+parking). They are stored in `store`, in tables `groups`, `projects` and `tasks`, exactly as ORBIT writes them
+standalone (ORBIT's ids, never with a `host` mark); `checkpoints`, `sessions`, `dayItems` and `captures` hold
+working state for them as well as for host tasks. A host-owned record never goes to any of these tables.
+
+- A galaxy is either the host's or ORBIT's own. ORBIT's systems go only into ORBIT's galaxies or deep space; the
+  host's stay in the host's galaxies or deep space. Deep space can hold both kinds side by side. A task moves
+  only between systems of the same kind; a whole system of ORBIT's goes to the host with `adopt` (below).
+- ORBIT places the host's unplaced galaxies around its own, so the two never sit on top of each other.
+- There is one Today, one What-next, one set of Insights and one search, across both kinds of task.
+- The example workspace is never offered while a host is attached (it would put made-up records in the host's
+  store).
+- **Backups.** A backup made while hosted is ORBIT's own part only: its galaxies, systems and tasks, checkpoints,
+  sessions, captures, day items, `taskWork`, `placements`, preferences and the focus runtime — never a host's
+  record. It is a normal ORBIT backup file (schema 5) and restores into standalone ORBIT too.
+- **Restore** replaces ORBIT's own part, as standalone ORBIT does: ORBIT checks the file, then calls
+  `store.replaceAll(snapshot)` once with the personal records and working state only. `replaceAll` must be
+  atomic on the host's side (all or nothing). Backups of schema 1–5 are accepted (a schema-4 file from
+  standalone ORBIT 1.0.0 arrives as all-personal). Working state that points at a host task that exists now is
+  kept; rows that point at nothing are dropped (with a warning before the person confirms). ORBIT then reads
+  `verse(id)` in full.
+- **Erase** is `store.replaceAll()` with an empty snapshot that keeps only the theme preference. Host records
+  are never touched by either.
+
+## Handing a system to the host (`caps.adopt`)
+
+With `caps.adopt` (together with `caps.personal` and `caps.work`) and an `adopt` method, a system of ORBIT's own
+offers "Move to <host>…". ORBIT first says, in a confirm of its own, how many tasks will be offered, which fields
+go to the host (title, notes, due, priority, done) and which stay with ORBIT as working state (parked,
+checkpoints, focus sessions, the day plan, energy, estimate, progress, subtasks, dependencies, web links), and
+offers a backup. Then it calls:
+
+```ts
+adopt({ name: 'Novels', tasks: [
+  { id: 'k3j9…', title: 'Finish the long one', notes: 'Chapter 12', due: '2026-11-10', priority: 3, status: 'todo' },
+  { id: 'p0q2…', title: 'Pick the next one', notes: '', due: null, priority: 2, status: 'todo' },
+] })
+// → { map: { 'k3j9…': 'host-task-17', 'p0q2…': 'host-task-18' } }   (or null: the person cancelled)
+```
+
+- The host shows a dialog of its own (where to put them, a preview of what moves) and creates the tasks. It may
+  take all, some or none: the `map` holds ORBIT's id → the host's new planet id for each task it took.
+  `null` means the person cancelled; a rejection means nothing was taken (its message is shown).
+- `status` is `todo` for ORBIT's todo and parked tasks, `done` for done ones. `notes` is `''` when empty.
+- For each task in the map ORBIT writes a `taskWork` row under the host's new id, moves its checkpoints,
+  sessions, day items, captures, the focus runtime and other tasks' dependencies to the new id, and removes
+  its own copy. The system goes too once it is empty; tasks the host did not take stay in it. Then ORBIT
+  refreshes, so the host's verse should already contain the new planets when `adopt` resolves.
+- Nothing is removed on ORBIT's side for a task the host did not take, or when `adopt` rejects.

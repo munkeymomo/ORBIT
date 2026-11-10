@@ -7,10 +7,10 @@ import type { Caps, Handshake } from './types';
 
 /**
  * What this build can do with the host's capabilities. Host-owned tasks can be changed (through
- * `host.tasks`, per record caps) and ORBIT keeps working state for them in `host.store`. ORBIT does not yet
- * keep records of its own (galaxies, projects, tasks) with a host: a later stage turns `personal` on.
+ * `host.tasks`, per record caps), ORBIT keeps working state for them in `host.store`, and ORBIT's own
+ * galaxies, systems and tasks (personal records) live beside the host's, stored in `host.store` too.
  */
-export const BUILD_SUPPORTS = { write: true, personal: false, work: true } as const;
+export const BUILD_SUPPORTS = { write: true, personal: true, work: true, adopt: true } as const;
 
 export interface HostAbilities {
   hosted: boolean;
@@ -24,6 +24,10 @@ export interface HostAbilities {
   work: boolean;
   /** Capture and the inbox are available (with personal records, or with working state). */
   capture: boolean;
+  /** Focus, parking and the day plan are available for some tasks (ORBIT's own, or the host's with `work`). */
+  plans: boolean;
+  /** A personal system can be handed to the host ("Move to <host>…", host.adopt). */
+  adopt: boolean;
   /** Set while the host refuses changes; the text says why. */
   locked?: string;
   /** "Open in <host>" */
@@ -32,7 +36,7 @@ export interface HostAbilities {
   storedLabel: string;
 }
 
-export const STANDALONE: HostAbilities = { hosted: false, name: 'ORBIT', write: true, personal: true, work: true, capture: true, openLabel: '', storedLabel: '' };
+export const STANDALONE: HostAbilities = { hosted: false, name: 'ORBIT', write: true, personal: true, work: true, capture: true, plans: true, adopt: false, openLabel: '', storedLabel: '' };
 
 export function abilities(info: Handshake | null | undefined): HostAbilities {
   if (!info) return STANDALONE;
@@ -46,6 +50,9 @@ export function abilities(info: Handshake | null | undefined): HostAbilities {
     personal,
     work,
     capture: personal || work,
+    plans: personal || work,
+    // the tasks handed over keep their working state with the host's: so `work` is needed too
+    adopt: !!info.caps?.adopt && BUILD_SUPPORTS.adopt && personal && work,
     locked: typeof info.locked === 'string' && info.locked.trim() ? info.locked.trim() : undefined,
     openLabel: info.labels?.open?.trim() || `Open in ${name}`,
     storedLabel: info.labels?.stored?.trim() || `Kept by ${name}`,
@@ -77,8 +84,19 @@ export const refusal = {
   work: (a: HostAbilities) => `Focus, parking and day plans are not available for tasks kept by ${a.name}.`,
   move: (a: HostAbilities) => `This system is kept by ${a.name}; move it to another galaxy there. You can still drag it to a new place in its own galaxy.`,
   data: (a: HostAbilities) => `Backups, examples and erasing are not available while ${a.name} keeps the records.`,
+  example: (a: HostAbilities) => `The example workspace is not offered here: it would put made-up records among the ones ${a.name} keeps.`,
+  adopt: (a: HostAbilities) => `${a.name} does not take systems from ORBIT.`,
   remove: (a: HostAbilities) => a.locked || `This is kept by ${a.name}; ORBIT does not delete it. Open it there to remove it.`,
   boundary: (a: HostAbilities) => `Tasks and systems kept by ${a.name} stay with it, and ORBIT’s own stay with ORBIT: they cannot be moved across.`,
+  /** A galaxy is either the host's or ORBIT's own: its systems are all one or the other. */
+  galaxy: (a: HostAbilities, intoHost: boolean) =>
+    intoHost
+      ? `Galaxies kept by ${a.name} hold only its systems. Put this one in a galaxy of your own, or in deep space.`
+      : `This system is kept by ${a.name} and stays in its galaxies (or deep space).`,
+  /** A task moved between one of ORBIT's own systems and one of the host's. */
+  task: (a: HostAbilities, intoHost: boolean) =>
+    (intoHost ? `Tasks of ORBIT’s own stay in ORBIT’s systems.` : `Tasks kept by ${a.name} stay in its systems.`) +
+    (a.adopt ? ` To hand a whole system of your own to ${a.name}, use “Move to ${a.name}…” in its menu.` : ''),
   target: (a: HostAbilities) => `${a.name} does not take tasks in that system.`,
   reason: (a: HostAbilities, what: 'delete' | 'drop') => `${a.name} asks for a reason to ${what} this task.`,
 };

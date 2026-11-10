@@ -106,14 +106,16 @@ describe('the fake host speaks protocol 1 (validated against the JSON Schema)', 
     expect(Math.max(...bySystem.values())).toBeGreaterThan(40);
   });
 
-  it('offers no capabilities by default; this build supports write and work but not personal', async () => {
+  it('offers no capabilities by default; this build supports write, work, personal and adopt', async () => {
     const info = await createFakeHost().handshake();
     expect(info.caps).toEqual({ write: false, personal: false, work: false });
-    expect(abilities(info)).toMatchObject({ write: false, personal: false, work: false, capture: false });
-    expect(BUILD_SUPPORTS).toEqual({ write: true, personal: false, work: true });
+    expect(abilities(info)).toMatchObject({ write: false, personal: false, work: false, capture: false, plans: false, adopt: false });
+    expect(BUILD_SUPPORTS).toEqual({ write: true, personal: true, work: true, adopt: true });
     // a host offering everything gets what this build supports
-    const a = abilities({ ...info, caps: { write: true, personal: true, work: true } });
-    expect([a.write, a.personal, a.work]).toEqual([true, false, true]);
+    const a = abilities({ ...info, caps: { write: true, personal: true, work: true, adopt: true } });
+    expect([a.write, a.personal, a.work, a.adopt]).toEqual([true, true, true, true]);
+    // adopt needs personal and work as well
+    expect(abilities({ ...info, caps: { personal: true, adopt: true } }).adopt).toBe(false);
   });
 });
 
@@ -357,8 +359,9 @@ describe('hosted store: read-only guards (every action that would change a host 
   it('createGroup', () => guarded((s) => s.createGroup('Mine'), personal));
   it('createProject', () => guarded((s) => s.createProject({ name: 'Mine' }), personal));
   it('createProject in a host galaxy', () => guarded((s) => s.createProject({ name: 'Mine', groupId: 'g-garden' }), personal));
-  it('loadExample', () => guarded((s) => s.loadExample(), data));
-  it('removeExample', () => guarded((s) => s.removeExample(), data));
+  const example = /The example workspace is not offered here/;
+  it('loadExample', () => guarded((s) => s.loadExample(), example));
+  it('removeExample', () => guarded((s) => s.removeExample(), example));
   it('resetAll', () => guarded((s) => s.resetAll(), data));
   it('restore rejects', async () => {
     const h = await hosted();

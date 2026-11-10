@@ -103,7 +103,8 @@
             "personal": { "type": "boolean", "description": "The host keeps ORBIT's own galaxies, projects and tasks." },
             "work": { "type": "boolean", "description": "The host keeps working state (parking, sessions, the day plan) for its tasks." },
             "pick": { "type": "array", "items": { "type": "string" }, "description": "Families host.pick() answers." },
-            "actions": { "type": "array", "items": { "type": "string" }, "description": "Ids host.action() answers." }
+            "actions": { "type": "array", "items": { "type": "string" }, "description": "Ids host.action() answers." },
+            "adopt": { "type": "boolean", "description": "host.adopt() takes ORBIT's own systems and their tasks (\"Move to <host>…\"). Used together with personal and work." }
           },
           "additionalProperties": false
         },
