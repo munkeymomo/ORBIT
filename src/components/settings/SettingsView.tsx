@@ -4,11 +4,11 @@ import { APP_VERSION, DOWNLOAD_URL, SUPPORT_URL, desktop, isFileCopy } from '../
 import { useOrbit } from '../../store/store';
 import { useAbilities } from '../../host/useAbilities';
 import type { Prefs } from '../../types';
-import { createBackup, parseBackupText, type ValidationResult } from '../../lib/backup';
+import { parseBackupText, type ValidationResult } from '../../lib/backup';
+import { backupFilename, backupJson, downloadBackupNow } from './backupNow';
 import {
   canInstall,
   copyText,
-  downloadText,
   isStandalone,
   notificationPermission,
   onInstallChange,
@@ -21,13 +21,14 @@ import { plural } from '../../lib/util';
 
 export function SettingsView() {
   const hosted = useOrbit((s) => !!s.host);
+  const can = useAbilities();
   return (
     <div className="h-full overflow-y-auto">
       <div className="mx-auto max-w-3xl space-y-5 px-4 py-5 md:px-8 md:py-8">
         <Appearance />
         <FocusPrefs />
         <Alerts />
-        {hosted ? <HostDataSection /> : <DataSection />}
+        {hosted && !can.personal ? <HostDataSection /> : <DataSection />}
         {!hosted && <InstallSection />}
         <About />
       </div>
@@ -187,14 +188,22 @@ function HostDataSection() {
   );
 }
 
+/**
+ * Backups, restore and erasing. Standalone: everything ORBIT has. Hosted with personal records: ORBIT's own
+ * records and working state only (kept by the host); the host's records are never in the file, and never replaced.
+ */
 function DataSection() {
-  const p = useOrbit((s) => s.projects.length);
-  const t = useOrbit((s) => s.tasks.length);
+  const can = useAbilities();
+  const hosted = can.hosted;
+  const own = <T extends { host?: unknown }>(rows: T[]) => rows.filter((r) => !r.host).length;
+  const p = useOrbit((s) => own(s.projects));
+  const t = useOrbit((s) => own(s.tasks));
+  const nWork = useOrbit((s) => s.taskWork.length);
   const nCheckpoints = useOrbit((s) => s.checkpoints.length);
   const nSessions = useOrbit((s) => s.sessions.length);
   const hasExample = useOrbit((s) => s.projects.some((x) => x.example) || s.tasks.some((x) => x.example) || s.captures.some((x) => x.example));
   const storageKind = useOrbit((s) => s.storageKind);
-  const { snapshot, restore, toast, confirm, loadExample, removeExample, resetAll } = useOrbit.getActions();
+  const { restore, toast, confirm, loadExample, removeExample, resetAll, hostTaskIds } = useOrbit.getActions();
   const [manualJson, setManualJson] = useState<string | null>(null);
   const [paste, setPaste] = useState('');
   const [pasteOpen, setPasteOpen] = useState(false);
@@ -202,13 +211,12 @@ function DataSection() {
   const [busy, setBusy] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
 
-  const json = () => JSON.stringify(createBackup(snapshot()), null, 2);
-  const filename = () => `orbit-backup-${new Date().toISOString().slice(0, 10)}.json`;
+  const json = backupJson;
+  const filename = backupFilename;
 
   const doExport = () => {
-    const text = json();
-    if (!downloadText(filename(), text)) setManualJson(text);
-    else toast({ tone: 'success', text: 'Backup downloaded. Keep it somewhere safe.' });
+    const blocked = downloadBackupNow();
+    if (blocked) setManualJson(blocked);
   };
   const doCopy = async () => {
     const text = json();
@@ -217,15 +225,17 @@ function DataSection() {
   };
   const readFile = async (f: File | undefined) => {
     if (!f) return;
-    setResult(parseBackupText(await f.text()));
+    setResult(parseBackupText(await f.text(), hosted ? { hostTaskIds: hostTaskIds() } : {}));
     if (fileRef.current) fileRef.current.value = '';
   };
   const applyRestore = () => {
     if (!result?.ok || !result.data) return;
     const d = result.data;
     confirm({
-      title: 'Replace all data with this backup?',
-      body: `Everything currently in ORBIT on this device (${p} projects, ${t} tasks) will be replaced by the backup (${result.counts?.projects} projects, ${result.counts?.tasks} tasks). If anything goes wrong, your current data is left untouched.`,
+      title: hosted ? 'Replace ORBIT’s own records with this backup?' : 'Replace all data with this backup?',
+      body: hosted
+        ? `ORBIT’s own galaxies, systems and tasks (${p} systems, ${t} tasks here now) and the working state kept with ${can.name} (checkpoints, focus sessions, captures, the day plan, positions, preferences) will be replaced by the backup (${result.counts?.projects} systems, ${result.counts?.tasks} tasks). Records kept by ${can.name} are not touched and are not in the backup. If anything goes wrong, nothing is changed.`
+        : `Everything currently in ORBIT on this device (${p} projects, ${t} tasks) will be replaced by the backup (${result.counts?.projects} projects, ${result.counts?.tasks} tasks). If anything goes wrong, your current data is left untouched.`,
       confirmLabel: 'Replace and restore',
       danger: true,
       onConfirm: async () => {
@@ -250,14 +260,23 @@ function DataSection() {
       icon={<HardDrive size={18} />}
       title="Your data"
       desc={
-        <>
-          Stored {storageKind === 'indexeddb' ? 'in this browser' : <strong className="text-amber">only in this tab (browser storage is unavailable)</strong>} on this device. Nothing is uploaded, and other devices or browsers will not see it. Back up regularly.
-        </>
+        hosted ? (
+          <>
+            ORBIT’s own galaxies, systems and tasks, and its working state (checkpoints, focus sessions, the day plan, positions, preferences), are kept with ORBIT by {can.name}. A backup holds those only.
+          </>
+        ) : (
+          <>
+            Stored {storageKind === 'indexeddb' ? 'in this browser' : <strong className="text-amber">only in this tab (browser storage is unavailable)</strong>} on this device. Nothing is uploaded, and other devices or browsers will not see it. Back up regularly.
+          </>
+        )
       }
     >
-      <p className="tabular mb-4 text-sm text-muted">
-        {plural(p, 'project')} · {plural(t, 'task')} · {plural(nCheckpoints, 'checkpoint')} · {plural(nSessions, 'focus session')}
+      <p className="tabular mb-1 text-sm text-muted">
+        {hosted ? <>Your own: {plural(p, 'system')} · {plural(t, 'task')}</> : <>{plural(p, 'project')} · {plural(t, 'task')}</>} · {plural(nCheckpoints, 'checkpoint')} · {plural(nSessions, 'focus session')}
+        {hosted && nWork > 0 && <> · working state for {plural(nWork, 'task')} kept by {can.name}</>}
       </p>
+      {hosted && <p className="mb-4 text-sm text-muted">Records kept by {can.name} are not in this file: they stay with {can.name}.</p>}
+      {!hosted && <div className="mb-3" />}
       <div className="flex flex-wrap gap-2">
         <Button variant="primary" icon={<Download size={15} />} onClick={doExport}>
           Download backup
@@ -287,7 +306,7 @@ function DataSection() {
       {pasteOpen && (
         <div className="mt-4 space-y-2">
           <Textarea value={paste} onChange={(e) => setPaste(e.target.value)} rows={5} placeholder='Paste the contents of an ORBIT backup ({"app":"orbit", …})' className="font-mono text-xs" aria-label="Backup text" />
-          <Button size="sm" variant="secondary" disabled={!paste.trim()} onClick={() => setResult(parseBackupText(paste))}>
+          <Button size="sm" variant="secondary" disabled={!paste.trim()} onClick={() => setResult(parseBackupText(paste, hosted ? { hostTaskIds: hostTaskIds() } : {}))}>
             Check backup
           </Button>
         </div>
@@ -329,7 +348,7 @@ function DataSection() {
       )}
 
       <div className="mt-5 flex flex-wrap gap-2 border-t border-line pt-4">
-        {hasExample ? (
+        {hosted ? null : hasExample ? (
           <Button variant="secondary" icon={<Sparkles size={15} />} onClick={() => void removeExample()}>
             Remove example data
           </Button>
@@ -343,15 +362,17 @@ function DataSection() {
           icon={<Trash2 size={15} />}
           onClick={() =>
             confirm({
-              title: 'Erase everything?',
-              body: 'All projects, tasks, checkpoints, sessions, captures and plans on this device will be deleted. Download a backup first if you might want them back.',
-              confirmLabel: 'Erase all data',
+              title: hosted ? 'Erase ORBIT’s own records?' : 'Erase everything?',
+              body: hosted
+                ? `ORBIT’s own galaxies, systems and tasks, and all working state kept with ${can.name} (checkpoints, sessions, captures, plans, positions), will be deleted. Records kept by ${can.name} are not touched. Download a backup first if you might want them back.`
+                : 'All projects, tasks, checkpoints, sessions, captures and plans on this device will be deleted. Download a backup first if you might want them back.',
+              confirmLabel: hosted ? 'Erase ORBIT’s own data' : 'Erase all data',
               danger: true,
               onConfirm: () => void resetAll(),
             })
           }
         >
-          Erase all data
+          {hosted ? 'Erase ORBIT’s own data' : 'Erase all data'}
         </Button>
       </div>
     </Section>

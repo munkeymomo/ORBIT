@@ -70,7 +70,15 @@ export function migrateBackup(raw: Record<string, unknown>): Record<string, unkn
   return out;
 }
 
-export function validateBackup(input: unknown): ValidationResult {
+export interface ValidateOptions {
+  /**
+   * Hosted: the host's tasks that exist now. Working state (day items, checkpoints, dependencies, the running
+   * focus, taskWork rows) that points at one of them is kept; `taskWork` rows for anything else are dropped.
+   */
+  hostTaskIds?: Set<string>;
+}
+
+export function validateBackup(input: unknown, opts: ValidateOptions = {}): ValidationResult {
   const errors: string[] = [];
   const warnings: string[] = [];
   if (!input || typeof input !== 'object' || Array.isArray(input)) return { ok: false, errors: ['This file is not an ORBIT backup (expected a JSON object).'], warnings };
@@ -100,12 +108,15 @@ export function validateBackup(input: unknown): ValidationResult {
   const orphanTasks = tasks.filter((t) => !projectIds.has(t.projectId));
   if (orphanTasks.length) warnings.push(`${orphanTasks.length} task(s) point to a missing project and will be skipped.`);
   const keptTasks = tasks.filter((t) => projectIds.has(t.projectId));
-  const taskIds = new Set(keptTasks.map((t) => t.id));
+  const taskIds = new Set([...keptTasks.map((t) => t.id), ...(opts.hostTaskIds ?? [])]);
   for (const t of keptTasks) t.dependsOn = t.dependsOn.filter((d) => taskIds.has(d));
 
   const dayItems = arr('dayItems').filter((d) => taskIds.has(d.taskId as string));
   const checkpoints = arr('checkpoints').filter((c) => taskIds.has(c.taskId as string));
   if (dayItems.length < arr('dayItems').length) warnings.push('Some day-plan entries pointed to missing tasks and will be skipped.');
+  const host = opts.hostTaskIds;
+  const taskWork = host ? arr('taskWork').filter((w) => host.has(w.id as string)) : arr('taskWork');
+  if (taskWork.length < arr('taskWork').length) warnings.push('Some working state pointed to tasks that are no longer here and will be skipped.');
 
   let focus = (m.focus ?? null) as Snapshot['focus'];
   if (focus && focus.taskId && !taskIds.has(focus.taskId)) {
@@ -122,7 +133,7 @@ export function validateBackup(input: unknown): ValidationResult {
     captures: arr('captures') as unknown as Snapshot['captures'],
     dayItems: dayItems as unknown as Snapshot['dayItems'],
     placements: arr('placements').map((p) => ({ ...p, x: typeof p.x === 'number' ? p.x : 0, y: typeof p.y === 'number' ? p.y : 0 })) as unknown as Snapshot['placements'],
-    taskWork: arr('taskWork') as unknown as Snapshot['taskWork'],
+    taskWork: taskWork as unknown as Snapshot['taskWork'],
     prefs: { ...DEFAULT_PREFS, ...((m.prefs as object) ?? {}) } as Snapshot['prefs'],
     focus,
   };
@@ -137,12 +148,12 @@ export function validateBackup(input: unknown): ValidationResult {
   return { ok: true, errors, warnings, data, counts };
 }
 
-export function parseBackupText(text: string): ValidationResult {
+export function parseBackupText(text: string, opts: ValidateOptions = {}): ValidationResult {
   let json: unknown;
   try {
     json = JSON.parse(text);
   } catch {
     return { ok: false, errors: ['This is not valid JSON.'], warnings: [] };
   }
-  return validateBackup(json);
+  return validateBackup(json, opts);
 }
