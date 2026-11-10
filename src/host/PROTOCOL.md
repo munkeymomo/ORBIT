@@ -39,10 +39,10 @@ interface OrbitHost {
   };
   /** The host shows a picker of its own and attaches what was chosen. Resolves when done (true = changed). */
   pick?(family: string, ctx: { planet?: string; system?: string; galaxy?: string }): Promise<boolean>;
-  /** Anything else the host does in a dialog of its own. */
+  /** Anything else the host does in a dialog of its own (see "Actions"). True = something changed (ORBIT refreshes). */
   action?(id: string, ctx: Record<string, string>): Promise<boolean>;
   /** Where to go first (read once, after the first verse has loaded). Not part of the JSON documents. */
-  at?: { galaxy?: string; system?: string; planet?: string };
+  at?: { verse?: string; galaxy?: string; system?: string; planet?: string };
   /** Take one of ORBIT's own systems and its tasks ("Move to <host>…"); see "Handing a system to the host". */
   adopt?(batch: {
     name: string;
@@ -55,10 +55,14 @@ interface OrbitHost {
 
 - **Which verse.** ORBIT opens the handshake's `start` verse. A verse whose `shown` is `false` is not offered:
   if `start` is hidden or missing, ORBIT opens the first verse that is shown (the first verse when none is).
+  `at.verse` (new in this revision, optional) opens that verse instead, when it is offered; otherwise it is ignored.
+  When the verse opened first is not the work verse (see "Several verses"), ORBIT loads the work verse first, then
+  the one it shows.
 - **Where.** When the host object has `at`, ORBIT reads it once, after the first verse has loaded, and goes
   there: `{ planet: 't-17' }` selects that planet and flies to its system; `{ system: 's-4' }` flies into the
   system; `{ galaxy: 'g-2' }` into the galaxy. When several are given the most precise one ORBIT has wins; ids
-  ORBIT does not have are ignored (and ORBIT opens the whole sky, as it would without `at`).
+  ORBIT does not have are ignored (and ORBIT opens the whole sky, as it would without `at`). The ids are looked
+  up in the verse opened first: `{ verse: 'things', planet: 'i-saw' }` selects the item `i-saw` there.
 
 ## Rules
 
@@ -82,8 +86,8 @@ interface OrbitHost {
 - **Kinds and families** are the host's strings. A family has a label and a colour; ORBIT knows nothing else
   about them.
 - **Tasks and items.** A planet of type `task` behaves like any ORBIT task. A planet of type `item` is a record
-  shown as a planet: it never enters focus, parking, Today, Next, Insights or task search, and is never counted
-  as a task.
+  shown as a planet: it never enters focus, parking, Today, Next, Insights, capture sorting, dependencies or task
+  search, and is never counted as a task (see "Items").
 
 ## Changing host tasks (`caps.write`)
 
@@ -180,3 +184,109 @@ adopt({ name: 'Novels', tasks: [
   its own copy. The system goes too once it is empty; tasks the host did not take stay in it. Then ORBIT
   refreshes, so the host's verse should already contain the new planets when `adopt` resolves.
 - Nothing is removed on ORBIT's side for a task the host did not take, or when `adopt` rejects.
+
+## Several verses
+
+A verse is one arrangement of the host's records as galaxies, systems and planets. A host may offer several
+(`handshake.verses`); ORBIT shows a switcher at the top of the sky when more than one is offered (`shown !== false`),
+each entry with the verse's `name` and its `plain` word under it, and the `legend` of the verse on screen beside it
+(and at the top of the "?" panel). Standalone, and with a single verse, there is no switcher.
+
+- **The work verse.** The first offered verse with `editable: true` (else the verse opened first) holds the tasks
+  ORBIT works on: the dock, focus, Today, Next, the inbox, Insights and task search always use ITS tasks, whichever
+  verse is on screen, and it stays loaded and refreshed. Task planets in any other verse are not shown. ORBIT's own
+  galaxies, systems and tasks (`caps.personal`) appear only while the work verse is on screen; in another verse
+  nothing can be created and systems cannot be moved between galaxies (they can still be dragged to a new place).
+  Selecting a task from search, the dock or Today while another verse shows brings the work verse back.
+- **Switching** calls `verse(id)` the first time; the last payload of each verse is kept in memory, so switching
+  back is instant and is then brought up to date with `verse(id, rev)`. The camera stays on the same galaxy (inside
+  a system, it lands at that system's galaxy); from the whole sky it shows the whole verse. A plain ~200 ms crossfade
+  (none with reduced motion). The selection stays only if the same id exists in the new verse.
+- **Refresh** (focus, visibility, every 30 s) asks `handshake()`, then the work verse and the verse on screen (when
+  it is another one), each with its `rev`. Other verses seen before are only refreshed when shown again. A verse
+  that stops being offered while on screen gives way to the work verse.
+- **Places.** A galaxy has the same id in every verse and ONE place (placement `g|<galaxy id>`, shared); a galaxy
+  without a placement takes the place it has in the work verse, so it does not move when the verse changes. A
+  system's place is per verse (`<verse id>|<system id>`).
+- **Galaxies across verses** are matched by id only. Each verse's own `name`, `color`, `chip` and so on are shown
+  in that verse; a galaxy that two verses name differently simply reads differently in each.
+
+## Items
+
+A planet of type `item` is a record shown as a planet, read-only. ORBIT keeps items apart from tasks (by system),
+so nothing that works on tasks can see them. What ORBIT does with each field:
+
+| Field | Use |
+|---|---|
+| `title` | its name (beside the planet, laid out like task names); `sub` follows it close up and under the title in its panel |
+| `kind`, `family` | the colour is the family's (`families[family].color`); the panel shows the family's label (or `kind`) |
+| `size` | the planet's diameter: √(size ÷ the largest `size` in the verse) across 26–60 (world units); missing → 32 |
+| `ring` | 0..1: a white ring around the planet showing that share; missing → no ring |
+| `state` | `live` filled; `archived` hollow; `gone` hollow and struck through; the panel shows a badge |
+| `ghost` | faint, dashed, with a small "elsewhere" mark; its panel shows only where it lives (its `also`) |
+| `note`, `notes`, `facts` | shown in its panel (`facts` as label/value rows) |
+| `attachments`, `more` | its moons: five drawn, then "+n" (`more` included); a moon with `flag: 'changed'` is red; listed in its panel and beside it when selected |
+| `open` | "Open in <host>" in its panel |
+| `also` | its wormholes (below) |
+| `system.count` | a system holding items says "n items": `count` when given, else the item planets sent |
+
+Counts in the dock, the top bar and on galaxies and systems stay TASK counts; items are said as "n items". More
+than 40 items in one system are drawn as a ring of dots (family colours) with a count; its panel lists them all
+(scrollable; typing narrows the list).
+
+## Arrows
+
+`verse.arrows` (`{from, to, label?}` between planet ids of the same verse, tasks or items) are relations such as
+"made from". ORBIT draws each as a thin solid curve with an open arrowhead, between two planets drawn one by one
+(close up), in systems of the same galaxy; the `label` shows when either end is selected or hovered. An arrow
+whose end is missing or not drawn is skipped. Arrows are never dependencies: they never use the padlock or the
+dashed "blocked" lines, and never change what Next suggests or what counts as blocked.
+
+## Wormholes (`also`)
+
+`also` on a galaxy, system, planet or attachment is the same record (or galaxy) in another verse:
+`{ verse, galaxy?, system?, object?, note? }`. Task, item, system and galaxy panels list them ("Wormholes": the
+target verse's name and plain word, and the `note`, e.g. "3 tasks use it"); a moon of the selected planet shows a
+small swirl that opens a menu of its wormholes (the moon itself still opens in the host). Following one switches
+verse and lands on the most precise target that verse has: `object` (a task or item: selected, and ORBIT flies to
+its system; an attachment id: the item holding it), else `system`, else `galaxy`, else the whole verse — and when
+the most precise one given is not there, a toast says so. The galaxy switcher is itself the galaxy wormhole.
+
+## Portals
+
+A system with `portal: { verse, label? }` leads to another verse. It is drawn as a violet swirl (not a star) with a
+chip "to <verse name>" (or `label`); the chip, or the button in its panel, switches to that verse in the same galaxy.
+
+## Actions
+
+New in this revision (additive): a verse, a galaxy or a system may list things the host does in a dialog of its own.
+
+```jsonc
+// handshake.verses[i]
+{ "id": "notes", "name": "Notes", "plain": "Writing", "legend": "…", "editable": false,
+  "actions": [{ "id": "new-notebook", "label": "New notebook…" }] }
+// verse.galaxies[i] and verse.systems[i]
+{ "id": "nt-gd-diary", "galaxy": "g-garden", "name": "Garden diary",
+  "actions": [{ "id": "new-note", "label": "New note…" }] }
+```
+
+Shape (all three): `actions?: Array<{ id: string /* 1–200 chars */; label: string /* not empty */ }>`.
+
+- A verse's actions are buttons beside the switcher while that verse is on screen; a galaxy's or system's are in
+  the "…" menu of its panel.
+- A click calls `host.action(id, ctx)` with `ctx = { verse, galaxy?, system? }`: `verse` is the verse on screen;
+  for a verse's action `galaxy` is the galaxy the person is in (if any); for a galaxy's, its id; for a system's,
+  its id and its galaxy's. Resolving `true` makes ORBIT refresh (the work verse and the verse on screen);
+  `false` changes nothing; a rejection is shown in a toast with its message (read from `.message` even when the
+  Error comes from another frame).
+- `handshake.caps.actions` may still list the ids the host answers; ORBIT does not require it.
+
+## What the host must do (several verses)
+
+- Use the SAME galaxy id for the same galaxy in every verse (that is what keeps its place and the camera).
+- Use the same id for the same record across verses, and different ids for different records: the selection
+  survives a switch when the id exists in the new verse, and wormholes resolve by id.
+- Within one verse every planet id is unique (a ghost needs its own id, e.g. `i-drill@garden`; its `also` points home).
+- Put tasks only in the editable verse ORBIT works on; task planets in other verses are not shown.
+- Answer `verse(id, since)` for every verse it offers, with a `rev` per verse.
+

@@ -11,6 +11,10 @@
  * working `tasks` API, with switches to refuse changes (`refuseNext`, `refuseAlways`, `setLocked`). One task,
  * "Fix the roof vent", always refuses changes to its fields; "Return the spare keys" may not be changed at all.
  * With `personal` as well it keeps ORBIT's own records (caps.personal) and takes ORBIT's systems (`adopt`).
+ *
+ * Besides its task verse ("main", "Everything") it offers three more arrangements of the same galaxies (`map`,
+ * `things`, `notes`, see demoVerses.ts) and answers their actions through `action()`; `verses: 'one'` offers only
+ * the task verse.
  */
 import { MemoryAdapter } from '../data/storage';
 import { addDays, toDateKey } from '../lib/util';
