@@ -15,6 +15,7 @@
 import { MemoryAdapter } from '../data/storage';
 import { addDays, toDateKey } from '../lib/util';
 import type { AdoptBatch, AdoptResult, StartAt, Attachment, Beacon, Caps, Collection, Galaxy, Handshake, HostTasks, OrbitHost, Planet, System, Unchanged, Verse } from './types';
+import { demoAction, otherVerses, VERSE_INFO } from './demoVerses';
 
 export interface FakeHost extends OrbitHost {
   store: MemoryAdapter;
@@ -26,8 +27,12 @@ export interface FakeHost extends OrbitHost {
   log: { op: string; args: unknown[] }[];
   /** Changes the verse (and its rev), as the host would after an edit of its own. */
   change(fn: (v: Verse) => void): void;
+  /** Changes another verse (and its rev). */
+  changeVerse(id: string, fn: (v: Verse) => void): void;
   /** The verse as the host has it now. */
   current(): Verse;
+  /** Any verse as the host has it now. */
+  verseNow(id: string): Verse | undefined;
   /** The next change ORBIT asks for is refused with this reason. */
   refuseNext(reason: string): void;
   /** Every change to this task is refused with this reason (undefined: stop refusing). */
@@ -62,6 +67,10 @@ export interface FakeHostOptions {
   adopt?: AdoptMode;
   /** `host.at`: where ORBIT goes first. */
   at?: StartAt;
+  /** 'one': only the task verse (as before this stage). Default: the task verse and three more (map, things, notes). */
+  verses?: 'one' | 'all';
+  /** The verse to open first (handshake `start`). */
+  start?: string;
 }
 
 const FAMILIES = {
@@ -285,12 +294,15 @@ export function createFakeHost(opts: FakeHostOptions = {}): FakeHost {
   const saved = (() => {
     try {
       const raw = storage?.getItem(STORAGE_KEY);
-      return raw ? (JSON.parse(raw) as { verse: Verse; rev: number; seq: number; store: ConstructorParameters<typeof MemoryAdapter>[0] }) : null;
+      return raw ? (JSON.parse(raw) as { verse: Verse; others?: Verse[]; rev: number; seq: number; store: ConstructorParameters<typeof MemoryAdapter>[0] }) : null;
     } catch {
       return null;
     }
   })();
   let current = saved?.verse ?? (editable ? editableVerse(demoVerse(opts.now)) : demoVerse(opts.now));
+  const many = opts.verses !== 'one';
+  /** The other verses (map, things, notes), with their own revs. */
+  const others = new Map<string, Verse>((saved?.others ?? (many ? otherVerses(current, opts.now) : [])).map((v) => [v.verse, v]));
   let rev = saved?.rev ?? 1;
   let seq = saved?.seq ?? 0;
   let locked = opts.locked || undefined;
@@ -301,9 +313,12 @@ export function createFakeHost(opts: FakeHostOptions = {}): FakeHost {
   const info: Handshake = {
     protocol,
     host: { name, version: '1.0' },
-    caps: editable ? { write: true, personal, work: true, pick: ['tool', 'doc'], ...(personal ? { adopt: true } : {}) } : { write: false, personal: false, work: false },
-    verses: [{ id: 'main', name: 'Everything', plain: 'tasks', legend: 'Size: open work · ring: share done · moons: what a task uses', editable }],
-    start: 'main',
+    caps: {
+      ...(editable ? { write: true, personal, work: true, pick: ['tool', 'doc'], ...(personal ? { adopt: true } : {}) } : { write: false, personal: false, work: false }),
+      ...(opts.verses !== 'one' ? { actions: ['new-notebook', 'new-note', 'galaxy-summary'] } : {}),
+    },
+    verses: [{ id: 'main', name: 'Everything', plain: 'Tasks', legend: 'Size: effort · ring: progress · moons: what a task uses · red glow: late', editable }, ...(many ? structuredClone(VERSE_INFO) : [])],
+    start: opts.start ?? 'main',
     labels: { stored: `Kept by ${name}` },
   };
   const store = new MemoryAdapter(saved?.store ?? undefined);
@@ -312,7 +327,7 @@ export function createFakeHost(opts: FakeHostOptions = {}): FakeHost {
     if (!storage) return;
     void store.load().then((snap) => {
       try {
-        storage.setItem(STORAGE_KEY, JSON.stringify({ verse: current, rev, seq, store: snap }));
+        storage.setItem(STORAGE_KEY, JSON.stringify({ verse: current, others: [...others.values()], rev, seq, store: snap }));
       } catch {
         /* full or blocked: the demo forgets on reload */
       }
@@ -450,6 +465,14 @@ export function createFakeHost(opts: FakeHostOptions = {}): FakeHost {
     },
     async verse(id: string, since?: string): Promise<Verse | Unchanged> {
       host.calls.verse++;
+      const other = others.get(id);
+      if (other) {
+        if (since && since === other.rev) {
+          host.calls.unchanged++;
+          return { verse: other.verse, rev: other.rev, unchanged: true };
+        }
+        return structuredClone(other);
+      }
       if (id !== current.verse) throw new Error(`No verse called “${id}”.`);
       if (since && since === current.rev) {
         host.calls.unchanged++;
@@ -464,7 +487,16 @@ export function createFakeHost(opts: FakeHostOptions = {}): FakeHost {
       fn(current);
       bump();
     },
+    changeVerse(id, fn) {
+      if (id === current.verse) return host.change(fn);
+      const v = others.get(id);
+      if (!v) throw new Error(`No verse called “${id}”.`);
+      fn(v);
+      v.rev = String(Number(v.rev) + 1 || 2);
+      persist();
+    },
     current: () => current,
+    verseNow: (id) => (id === current.verse ? current : others.get(id)),
     refuseNext(reason) {
       refuseNext = reason;
     },
@@ -511,6 +543,26 @@ export function createFakeHost(opts: FakeHostOptions = {}): FakeHost {
       }
       bump();
       return { map };
+    };
+  }
+  if (many) {
+    /* The host's own dialogs for the actions its verses offer ("New notebook…", "New note…", "Print a summary…"). */
+    host.action = async (id, ctx) => {
+      host.log.push({ op: 'action', args: [id, structuredClone(ctx)] });
+      await wait();
+      if (locked) throw new Error(locked);
+      if (refuseNext) {
+        const r = refuseNext;
+        refuseNext = null;
+        throw new Error(r);
+      }
+      const changed = demoAction(others, id, ctx, ++seq);
+      if (changed) {
+        const notes = others.get('notes')!;
+        notes.rev = String(Number(notes.rev) + 1 || 2);
+        persist();
+      }
+      return changed;
     };
   }
   if (editable) {
