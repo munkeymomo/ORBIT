@@ -545,8 +545,8 @@ export function UniverseCanvas({ onNewSystem, onNewGalaxy }: { onNewSystem: (gal
         const origin = gs.find((g) => g.id === drag.origin);
         const target = drag.target ? gs.find((g) => g.id === drag.target) : null;
         const project = orbit().projects.find((p) => p.id === drag.id);
-        if (target && target.id !== drag.origin && project?.host) {
-          // a host's system: the store refuses and says where to move it
+        if (target && target.id !== drag.origin && (project?.host || target.host)) {
+          // a host's system leaving its galaxy, or one of ORBIT's own into a host's galaxy: the store refuses and says why
           updateProject(drag.id, { groupId: target.id === DEEP_SPACE_ID ? null : target.id });
         } else if (target && target.id !== drag.origin && project) {
           const before = { groupId: project.groupId, x: project.x, y: project.y };
@@ -706,13 +706,15 @@ export function UniverseCanvas({ onNewSystem, onNewGalaxy }: { onNewSystem: (gal
             const [sx, sy] = toS(drag.wx, drag.wy);
             const target = drag.target ? galaxies.find((g) => g.id === drag.target) : null;
             const kept = !!orbit().projects.find((p) => p.id === drag.id)?.host;
-            const moving = target && target.id !== drag.origin && !kept;
+            // a galaxy is the host's or ORBIT's own: a system crosses into the other kind only by being refused
+            const across = !!target && target.id !== drag.origin && !kept && !!target.host;
+            const moving = target && target.id !== drag.origin && !kept && !across;
             const origin = galaxies.find((g) => g.id === drag.origin);
             const outside = (!target || (kept && target.id !== drag.origin)) && origin && Math.hypot(drag.wx - origin.x, drag.wy - origin.y) >= origin.r + 400;
-            if (!moving && !outside) return null;
+            if (!moving && !outside && !across) return null;
             return (
               <div className="pointer-events-none absolute z-40 -translate-x-1/2 rounded-full border px-3 py-1 text-xs font-medium whitespace-nowrap shadow-panel" style={{ left: sx, top: sy - 44, background: moving ? 'var(--accent)' : 'var(--surface-3)', borderColor: moving ? 'transparent' : 'var(--line-strong)', color: moving ? '#fff' : 'var(--muted)' }}>
-                {moving ? `Move to ${target!.id === DEEP_SPACE_ID ? 'deep space' : target!.name}` : kept ? `Kept by ${can.name}: release to put it back` : 'Release to put it back'}
+                {moving ? `Move to ${target!.id === DEEP_SPACE_ID ? 'deep space' : target!.name}` : kept ? `Kept by ${can.name}: release to put it back` : across ? `${target!.name} is kept by ${can.name}: release to put it back` : 'Release to put it back'}
               </div>
             );
           })()}
@@ -870,9 +872,10 @@ export function UniverseCanvas({ onNewSystem, onNewGalaxy }: { onNewSystem: (gal
             )}
             items={[
               {
-                label: ctx.galaxy && !ctx.galaxy.virtual ? `New system in ${ctx.galaxy.name}` : 'New system',
+                // a host's galaxy holds only the host's systems: a new one of ORBIT's own starts in deep space
+                label: ctx.galaxy && !ctx.galaxy.virtual && !ctx.galaxy.host ? `New system in ${ctx.galaxy.name}` : 'New system',
                 icon: <Sparkles size={15} />,
-                onSelect: () => onNewSystem(ctx.galaxy ? (ctx.galaxy.virtual ? null : ctx.galaxy.id) : null),
+                onSelect: () => onNewSystem(ctx.galaxy && !ctx.galaxy.virtual && !ctx.galaxy.host ? ctx.galaxy.id : null),
               },
               { label: 'New galaxy', icon: <Plus size={15} />, onSelect: onNewGalaxy },
               'sep',

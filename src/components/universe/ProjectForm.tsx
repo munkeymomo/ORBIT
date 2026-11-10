@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useMemo } from 'react';
 import { Check, Plus } from 'lucide-react';
 import { PROJECT_COLORS } from '../../lib/colors';
 import { useOrbit } from '../../store/store';
@@ -59,7 +59,9 @@ export function IconPicker({ value, onChange, color }: { value: string; onChange
 }
 
 export function GroupSelect({ value, onChange }: { value: string | null; onChange: (g: string | null) => void }) {
-  const groups = useOrbit((s) => s.groups);
+  // ORBIT's own systems go only into ORBIT's own galaxies (a host's galaxies hold only the host's systems)
+  const all = useOrbit((s) => s.groups);
+  const groups = useMemo(() => all.filter((g) => !g.host), [all]);
   const createGroup = useOrbit((s) => s.createGroup);
   const [adding, setAdding] = useState(false);
   const [name, setName] = useState('');

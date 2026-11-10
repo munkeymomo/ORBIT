@@ -9,6 +9,7 @@ import { Field, IconButton, Input, Menu, SectionTitle, Textarea, cx } from '../u
 import { DueBadge, EnergyIcon, PriorityBars, ProgressRing, ProjectGlyph } from '../ui/visuals';
 import { ColorPicker, GroupSelect, IconPicker } from '../universe/ProjectForm';
 import { useDraft } from './actions';
+import { useAbilities } from '../../host/useAbilities';
 
 export function ProjectPanel({ id }: { id: string }) {
   const project = useOrbit((s) => s.projects.find((p) => p.id === id))!;
@@ -20,6 +21,7 @@ export function ProjectPanel({ id }: { id: string }) {
   const select = useOrbit((s) => s.select);
   const confirm = useOrbit((s) => s.confirm);
   const deleteProject = useOrbit((s) => s.deleteProject);
+  const can = useAbilities();
   const [newTitle, setNewTitle] = useState('');
   const [showDone, setShowDone] = useState(false);
   const [editing, setEditing] = useState(false);
@@ -58,6 +60,7 @@ export function ProjectPanel({ id }: { id: string }) {
           items={[
             { label: editing ? 'Done editing appearance' : 'Edit colour, icon and galaxy', onSelect: () => setEditing((e) => !e) },
             { label: 'Show in the Universe', onSelect: () => { useOrbit.getActions().setView('universe'); useOrbit.getActions().requestFlight('system', id); } },
+            ...(can.adopt && !can.locked ? [{ label: `Move to ${can.name}…`, onSelect: () => confirm(adoptRequest(can.name, project.name, own.length, () => void useOrbit.getActions().adoptProject(id))) }] : []),
             'sep',
             {
               label: 'Delete project',
@@ -194,4 +197,19 @@ export function ProjectPanel({ id }: { id: string }) {
       </div>
     </div>
   );
+}
+
+/** ORBIT's own confirm before handing a system to the host: what goes, what stays, and a backup first. */
+export function adoptRequest(host: string, name: string, n: number, go: () => void) {
+  return {
+    title: `Move “${name}” to ${host}?`,
+    body:
+      `${n === 1 ? 'Its 1 task' : `Its ${n} tasks`} will be offered to ${host}, which asks where to put them and shows what moves. ` +
+      `For each task it takes, ${host} keeps the title, notes, due date, priority and whether it is done.\n\n` +
+      `What else ORBIT knows about them stays with ORBIT as working state (kept with ORBIT by ${host}, not in your ${host} records): parked or not, checkpoints, focus sessions, the day plan, energy, estimate, progress, subtasks, dependencies and web links.\n\n` +
+      `Tasks ${host} does not take stay here. Taking a backup first is a good idea.`,
+    confirmLabel: `Continue in ${host}`,
+    backup: true,
+    onConfirm: go,
+  };
 }

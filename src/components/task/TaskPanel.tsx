@@ -48,6 +48,8 @@ export function TaskPanel({ id }: { id: string }) {
   const work = mayWork(can, task.host);
   const movable = task.host ? may(can, task.host, 'move') : editable;
   const hostTargets = useMemo(() => (p: Project) => !!p.host && may(can, p.host, 'create'), [can]);
+  // ORBIT's own tasks move only between ORBIT's own systems (a whole system goes to the host by "Move to …")
+  const ownTargets = useMemo(() => (p: Project) => !p.host, []);
 
   const title = useDraft(task.title, (v) => v.trim() && up({ title: v.trim() }), 500);
   const notes = useDraft(task.notes, (v) => up({ notes: v }));
@@ -168,7 +170,8 @@ export function TaskPanel({ id }: { id: string }) {
             )}
             {movable && !task.host?.pending && (
               <Field label={task.host ? 'System' : 'Project'} className="col-span-2">
-                <ProjectSelect value={task.projectId} onChange={(projectId) => up({ projectId })} only={task.host ? hostTargets : undefined} />
+                <ProjectSelect value={task.projectId} onChange={(projectId) => up({ projectId })} only={task.host ? hostTargets : can.hosted ? ownTargets : undefined} />
+                {!task.host && can.adopt && <p className="mt-1 text-xs text-faint">To hand this whole system to {can.name}, use “Move to {can.name}…” in the system’s menu.</p>}
               </Field>
             )}
           </section>

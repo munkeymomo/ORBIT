@@ -28,7 +28,9 @@ export function UniverseView() {
     select({ type: 'project', id: p.id });
   };
 
-  if (count === 0 && galaxyCount === 0) return hosted ? <EmptyHosted /> : <FirstRun onCreate={create} />;
+  const personal = useAbilities().personal;
+  // hosted with ORBIT's own records: a first system of one's own, but never the example workspace
+  if (count === 0 && galaxyCount === 0) return hosted && !personal ? <EmptyHosted /> : <FirstRun onCreate={create} hosted={hosted} />;
 
   return (
     <>
@@ -66,7 +68,7 @@ function EmptyHosted() {
   );
 }
 
-function FirstRun({ onCreate }: { onCreate: (d: ProjectDraft) => void }) {
+function FirstRun({ onCreate, hosted = false }: { onCreate: (d: ProjectDraft) => void; hosted?: boolean }) {
   const loadExample = useOrbit((s) => s.loadExample);
   const [name, setName] = useState('');
   const [color, setColor] = useState(PROJECT_COLORS[0].id);
@@ -99,13 +101,17 @@ function FirstRun({ onCreate }: { onCreate: (d: ProjectDraft) => void }) {
             Create project
           </Button>
         </form>
-        <div className="my-5 flex items-center gap-3 text-xs text-faint">
-          <span className="h-px flex-1 bg-line" /> or <span className="h-px flex-1 bg-line" />
-        </div>
-        <Button variant="secondary" className="w-full" icon={<Sparkles size={16} />} onClick={() => void loadExample()}>
-          Explore an example workspace
-        </Button>
-        <p className="mt-3 text-center text-xs text-faint">Example items are labelled and can be removed in Settings. Everything is stored on this device only.</p>
+        {!hosted && (
+          <>
+            <div className="my-5 flex items-center gap-3 text-xs text-faint">
+              <span className="h-px flex-1 bg-line" /> or <span className="h-px flex-1 bg-line" />
+            </div>
+            <Button variant="secondary" className="w-full" icon={<Sparkles size={16} />} onClick={() => void loadExample()}>
+              Explore an example workspace
+            </Button>
+            <p className="mt-3 text-center text-xs text-faint">Example items are labelled and can be removed in Settings. Everything is stored on this device only.</p>
+          </>
+        )}
       </div>
     </div>
   );

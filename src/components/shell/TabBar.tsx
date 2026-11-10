@@ -39,7 +39,7 @@ export function TabBar() {
     <>
       <nav aria-label="Main" className="safe-bottom z-20 flex shrink-0 items-stretch border-t border-line bg-surface/90 px-1 backdrop-blur-xl">
         <Tab id="universe" label="Universe" icon={Orbit} />
-        {can.work && <Tab id="today" label="Today" icon={CalendarDays} />}
+        {can.plans && <Tab id="today" label="Today" icon={CalendarDays} />}
         <div className="flex flex-1 items-center justify-center">
           {can.capture && <button
             onClick={() => setCaptureOpen(true)}
