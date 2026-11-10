@@ -646,3 +646,38 @@ describe('a refused completion keeps the focus session', () => {
     expect(h.s().focus?.taskId).toBe('t-compost');
   });
 });
+
+describe('left-over working state', () => {
+  it('counts what belongs to tasks the host stopped listing, and clears it on request', async () => {
+    const h = await editable();
+    h.s().parkTask('t-compost', { nextAction: 'Fork the heap' });
+    h.s().planTask('t-compost', TODAY, 'morning');
+    h.s().planTask('t-keys', TODAY, 'later');
+    await h.settle();
+    expect(h.s().orphanCounts()).toEqual({ taskWork: 0, dayItems: 0, checkpoints: 0 });
+    // the host removes the task on its own pages
+    await h.host.tasks!.remove('t-compost', 'gone');
+    // a hiccup: nothing looks lost while the host cannot be read
+    const verse = h.host.verse.bind(h.host);
+    h.host.verse = () => Promise.reject(new Error('down'));
+    await h.s().refreshHost();
+    expect(h.s().orphanCounts()).toEqual({ taskWork: 0, dayItems: 0, checkpoints: 0 });
+    h.host.verse = verse;
+    await h.s().refreshHost();
+    await h.settle();
+    expect(h.task('t-compost')).toBeUndefined();
+    const o = h.s().orphanCounts();
+    expect(o.taskWork).toBe(1);
+    expect(o.dayItems).toBe(1);
+    expect(o.checkpoints).toBeGreaterThan(0);
+    // still stored: nothing was deleted by itself
+    expect((await h.saved()).dayItems.some((d) => d.taskId === 't-compost')).toBe(true);
+    expect(h.s().clearOrphans()).toBe(o.taskWork + o.dayItems + o.checkpoints);
+    await h.settle();
+    expect(h.s().orphanCounts()).toEqual({ taskWork: 0, dayItems: 0, checkpoints: 0 });
+    const saved = await h.saved();
+    expect(saved.taskWork.some((w) => w.id === 't-compost')).toBe(false);
+    expect(saved.dayItems.some((d) => d.taskId === 't-compost')).toBe(false);
+    expect(saved.dayItems.some((d) => d.taskId === 't-keys')).toBe(true); // a live task's entry stays
+  });
+});

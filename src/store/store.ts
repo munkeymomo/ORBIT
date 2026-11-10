@@ -26,6 +26,7 @@ import type {
   ViewName,
 } from '../types';
 import { emptySnapshot, MemoryAdapter, type StorageAdapter } from '../data/storage';
+import { orphanedWork } from './selectors';
 import { DEFAULT_PREFS, normaliseHostedSnapshot } from '../data/normalise';
 import * as T from '../lib/timer';
 import { uid, toDateKey } from '../lib/util';
@@ -218,6 +219,13 @@ export interface OrbitState extends Snapshot {
   adoptProject: (projectId: string) => Promise<number>;
   /** Ids of the host's tasks on screen (restoring a backup keeps working state that points at them). */
   hostTaskIds: () => Set<string>;
+  /**
+   * Hosted: how many rows of working state (parking notes, day-plan entries, checkpoints) belong to tasks the host
+   * no longer lists. 0 until a verse has loaded without error: a host that hiccups never makes anything look lost.
+   */
+  orphanCounts: () => { taskWork: number; dayItems: number; checkpoints: number };
+  /** Hosted: remove those rows (tombstones through the store). Returns how many. */
+  clearOrphans: () => number;
 
   // navigation & UI
   setView: (v: ViewName) => void;
@@ -1096,6 +1104,27 @@ export function createOrbitStore(deps: StoreDeps = {}): StoreApi<OrbitState> {
       },
 
       hostTaskIds: () => new Set(get().tasks.filter((t) => t.host && !t.host.pending).map((t) => t.id)),
+      orphanCounts: () => {
+        const h = get().host;
+        if (!h || h.error || !h.rev || !can().work) return { taskWork: 0, dayItems: 0, checkpoints: 0 };
+        const o = orphanedWork(get(), removing.keys());
+        return { taskWork: o.taskWork.length, dayItems: o.dayItems.length, checkpoints: o.checkpoints.length };
+      },
+      clearOrphans: () => {
+        const h = get().host;
+        if (!h || h.error || !h.rev || !can().work) return 0;
+        const o = orphanedWork(get(), removing.keys());
+        const gone = new Set(o.taskWork);
+        set({
+          taskWork: get().taskWork.filter((w) => !gone.has(w.id)),
+          dayItems: get().dayItems.filter((d) => !o.dayItems.includes(d.id)),
+          checkpoints: get().checkpoints.filter((c) => !o.checkpoints.includes(c.id)),
+        });
+        del('taskWork', o.taskWork);
+        del('dayItems', o.dayItems);
+        del('checkpoints', o.checkpoints);
+        return o.taskWork.length + o.dayItems.length + o.checkpoints.length;
+      },
       adoptProject: async (projectId) => {
         const a = can();
         const project = get().projects.find((p) => p.id === projectId);

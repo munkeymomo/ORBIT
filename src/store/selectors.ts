@@ -116,3 +116,19 @@ export function comingUp<B extends { title: string; due?: string | null; state: 
   const all = [...soon, ...late];
   return { shown: all.slice(0, max), more: all.slice(max) };
 }
+
+/**
+ * Hosted: working state ORBIT still keeps for tasks that are gone — ids that are neither a task now on screen (the
+ * host's, ORBIT's own, or one still being created under a temporary id) nor one being removed right now.
+ */
+export function orphanedWork(
+  s: { tasks: { id: string }[]; taskWork: { id: string }[]; dayItems: { id: string; taskId: string }[]; checkpoints: { id: string; taskId: string }[] },
+  leaving: Iterable<string> = [],
+): { taskWork: string[]; dayItems: string[]; checkpoints: string[] } {
+  const known = new Set([...s.tasks.map((t) => t.id), ...leaving]);
+  return {
+    taskWork: s.taskWork.filter((w) => !known.has(w.id)).map((w) => w.id),
+    dayItems: s.dayItems.filter((d) => !known.has(d.taskId)).map((d) => d.id),
+    checkpoints: s.checkpoints.filter((c) => !known.has(c.taskId)).map((c) => c.id),
+  };
+}

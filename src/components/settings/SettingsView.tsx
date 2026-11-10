@@ -30,6 +30,7 @@ export function SettingsView() {
         <FocusPrefs />
         <Alerts />
         {hosted && !can.personal ? <HostDataSection /> : <DataSection />}
+        {hosted && can.work && <LeftOverWork />}
         {!hosted && <InstallSection />}
         <About />
       </div>
@@ -168,6 +169,49 @@ function Alerts() {
                 : 'Your browser will ask for permission the first time.'
           }
         />
+      </div>
+    </Section>
+  );
+}
+
+/** Hosted: working state kept for tasks the host no longer lists, with a way to clear it. */
+function LeftOverWork() {
+  const can = useAbilities();
+  const n = useOrbit((s) => {
+    const o = s.orphanCounts();
+    return o.taskWork + o.dayItems + o.checkpoints;
+  });
+  const notes = useOrbit((s) => {
+    const o = s.orphanCounts();
+    return o.taskWork + o.checkpoints;
+  });
+  const plans = useOrbit((s) => s.orphanCounts().dayItems);
+  const confirm = useOrbit((s) => s.confirm);
+  const clear = useOrbit((s) => s.clearOrphans);
+  const toast = useOrbit((s) => s.toast);
+  if (!n) return null;
+  return (
+    <Section icon={<HardDrive size={18} />} title="Left over" desc={<>Kept with ORBIT by {can.name} for tasks it no longer lists.</>}>
+      <p className="tabular text-sm text-muted" data-testid="left-over">
+        {plural(notes, 'parking note')} and {plural(plans, 'day-plan entry', 'day-plan entries')} belong to tasks {can.name} no longer lists.
+      </p>
+      <p className="mt-1 text-xs text-faint">They are hidden already. Clear them only if the tasks are really gone (not just missing for a moment).</p>
+      <div className="mt-3">
+        <Button
+          size="sm"
+          variant="secondary"
+          onClick={() =>
+            confirm({
+              title: 'Clear what belongs to tasks that are gone?',
+              body: `${plural(notes, 'parking note')} and ${plural(plans, 'day-plan entry', 'day-plan entries')} for tasks ${can.name} no longer lists will be removed. Nothing of ${can.name}’s is touched.`,
+              confirmLabel: 'Clear them',
+              danger: true,
+              onConfirm: () => toast({ text: `Cleared ${plural(clear(), 'item')}.` }),
+            })
+          }
+        >
+          Clear them
+        </Button>
       </div>
     </Section>
   );
