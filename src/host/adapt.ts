@@ -136,18 +136,27 @@ export function planetToTask(verse: string, p: Planet): Task {
   };
 }
 
-export function adaptVerse(v: Verse, placements: Placement[]): AdaptedVerse {
+export interface AdaptOptions {
+  /** Where ORBIT's own galaxies sit: the host's are auto-placed around them. */
+  taken?: Pt[];
+  /** ORBIT's own systems use deep space, so it needs a place even when no host system lives there. */
+  deepUsed?: boolean;
+  /** Where ORBIT's own systems in deep space sit: the host's are auto-placed around them. */
+  deepTaken?: Pt[];
+}
+
+export function adaptVerse(v: Verse, placements: Placement[], opts: AdaptOptions = {}): AdaptedVerse {
   const verse = v.verse;
   const placed = new Map(placements.map((p) => [p.id, p]));
   const galaxies = v.galaxies ?? [];
   const systems = v.systems ?? [];
   const galaxyIds = new Set(galaxies.map((g) => g.id));
   const holderOf = (s: System) => (s.galaxy && galaxyIds.has(s.galaxy) ? s.galaxy : DEEP_SPACE);
-  const deepUsed = systems.some((s) => holderOf(s) === DEEP_SPACE);
+  const deepUsed = !!opts.deepUsed || systems.some((s) => holderOf(s) === DEEP_SPACE);
 
   /* galaxy centres: placed ones first, then free spiral slots in verse order */
   const centres = new Map<string, Pt>();
-  const taken: Pt[] = [];
+  const taken: Pt[] = [...(opts.taken ?? [])];
   for (const g of galaxies) {
     const p = placed.get(placementKey.galaxy(g.id));
     if (p) {
@@ -173,8 +182,8 @@ export function adaptVerse(v: Verse, placements: Placement[]): AdaptedVerse {
     if (!byHolder.has(h)) byHolder.set(h, []);
     byHolder.get(h)!.push(s);
   }
-  for (const members of byHolder.values()) {
-    const inUse: Pt[] = [];
+  for (const [holder, members] of byHolder) {
+    const inUse: Pt[] = holder === DEEP_SPACE ? [...(opts.deepTaken ?? [])] : [];
     for (const s of members) {
       const p = placed.get(placementKey.system(verse, s.id));
       if (p) {

@@ -84,14 +84,18 @@ export interface WriterContext {
 }
 
 const PERSONAL: TableName[] = ['groups', 'projects', 'tasks'];
-const WORK: TableName[] = ['checkpoints', 'sessions', 'dayItems', 'taskWork'];
+/** Working state that may be about ORBIT's own tasks as well as the host's. */
+const WORK: TableName[] = ['checkpoints', 'sessions', 'dayItems'];
 
 /** Which of ORBIT's own tables the host keeps. */
 export function hostKeeps(a: HostAbilities, table: TableName): boolean {
   if (table === 'placements') return true;
   if (table === 'captures') return a.personal || a.work;
   if (PERSONAL.includes(table)) return a.personal;
-  if (WORK.includes(table)) return a.work;
+  // checkpoints, sessions and day items are kept for ORBIT's own tasks (personal) and the host's (work)
+  if (WORK.includes(table)) return a.personal || a.work;
+  // one row per HOST task: only with work
+  if (table === 'taskWork') return a.work;
   return false;
 }
 
@@ -383,7 +387,7 @@ export function createRecordWriter(ctx: () => WriterContext): RecordWriter {
     },
     async setFocus(rt) {
       const { adapter, hosted } = ctx();
-      if (hosted && !hosted.abilities.work) return; // the host keeps no working state: the timer lives in memory
+      if (hosted && !hosted.abilities.plans) return; // the host keeps no working state: the timer lives in memory
       await adapter.setFocus(rt);
     },
     seed(tasks) {
