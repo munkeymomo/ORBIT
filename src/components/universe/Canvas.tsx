@@ -818,11 +818,13 @@ export function UniverseCanvas({ onNewSystem, onNewGalaxy }: { onNewSystem: (gal
             if (!onScreen(cx, cy, sr * 1.2) || k > 1.05) return null;
             const universe = level === 'universe';
             const spot = galaxyLabels?.get(g.id);
+            // a galaxy fitted closer than its whole disc has its rim above the view: its name stays under the toolbar
+            const labelBottom = (cyy: number, srr: number) => Math.max(cyy - srr - 6, (size.top ?? 76) + 48);
             // its words never show through the minimap or the zoom control (nor the toolbar's row)
             const lw = Math.max(universe ? 150 : 90, measureGalaxyName(g.name) + 34, measureLabel(galaxyCountText(g)) + 34, g.host?.chip ? measureLabel(g.host.chip) + 40 : 0);
             const lh = universe ? galaxyLabelHeight(!!g.host?.chip || isYours(can.hosted, g), !!spot?.brief) : 44;
             const lx = universe && spot ? (spot.side === 'left' ? spot.x + spot.w - lw : spot.side === 'right' ? spot.x : spot.x + spot.w / 2 - lw / 2) : cx - lw / 2;
-            const ly = universe ? (spot?.y ?? cy + Math.min(sr * 0.92, sr * 0.5 + 70)) : cy - sr - 6 - lh;
+            const ly = universe ? (spot?.y ?? cy + Math.min(sr * 0.92, sr * 0.5 + 70)) : labelBottom(cy, sr) - lh;
             const under = ui.some((r) => overlaps({ x: lx, y: ly, w: lw, h: lh }, r));
             return (
               <GalaxyLabel
@@ -831,7 +833,7 @@ export function UniverseCanvas({ onNewSystem, onNewGalaxy }: { onNewSystem: (gal
                 g={g}
                 x={universe && spot ? (spot.side === 'left' ? spot.x + spot.w : spot.side === 'right' ? spot.x : spot.x + spot.w / 2) : cx}
                 beside={universe && spot && (spot.side === 'left' || spot.side === 'right') ? spot.side : undefined}
-                y={universe ? (spot?.y ?? cy + Math.min(sr * 0.92, sr * 0.5 + 70)) : cy - sr - 6}
+                y={universe ? (spot?.y ?? cy + Math.min(sr * 0.92, sr * 0.5 + 70)) : labelBottom(cy, sr)}
                 compact={!universe}
                 brief={universe && !!spot?.brief}
                 yours={isYours(can.hosted, g)}

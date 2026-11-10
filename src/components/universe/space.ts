@@ -251,8 +251,34 @@ export function fitUniverse(galaxies: GalaxyPlace[], size: Size): View {
 /** How much closer than the whole-universe fit a view must be to count as inside a galaxy. */
 export const ENTER_RATIO = 1.04;
 
+/**
+ * A galaxy fills the view. Its disc has a floor of 700 world units, so a galaxy of a few systems near its middle
+ * was fitted tiny, in a mostly empty disc and a wide empty window. A galaxy is fitted to where its systems actually
+ * are (their box, with room for names), but never closer than 70% of the disc, so the disc stays in view, and never
+ * further out than the whole disc. A galaxy with dates on its rim keeps the whole disc, since those labels hang there.
+ */
 export function fitGalaxy(g: GalaxyPlace, size: Size): View {
-  return fitCircle(g.x, g.y, g.r + 60, size, 0.9);
+  const whole = fitCircle(g.x, g.y, g.r + 60, size, 0.9);
+  if (g.beacons?.length || !g.systems?.length) return whole;
+  const pad = 90;
+  let minX = Infinity;
+  let minY = Infinity;
+  let maxX = -Infinity;
+  let maxY = -Infinity;
+  for (const s of g.systems) {
+    minX = Math.min(minX, s.x - s.extent - pad);
+    maxX = Math.max(maxX, s.x + s.extent + pad);
+    minY = Math.min(minY, s.y - s.extent - pad);
+    maxY = Math.max(maxY, s.y + s.extent + pad);
+  }
+  const top = topPad(size);
+  const kBox = Math.min((size.w - PADS.side * 2) / (maxX - minX), (size.h - top - PADS.bottom) / (maxY - minY));
+  const k = clamp(kBox, whole.k, Math.min(1, whole.k / 0.7));
+  if (k <= whole.k * 1.02) return whole;
+  const cx = (minX + maxX) / 2;
+  const cy = (minY + maxY) / 2;
+  const midY = top + (size.h - top - PADS.bottom) / 2;
+  return { k, x: size.w / 2 - cx * k, y: midY - cy * k };
 }
 
 /**

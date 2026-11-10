@@ -267,3 +267,33 @@ describe('system names (wrapMiddle)', () => {
     expect(starNameLines(`${base} · batch 9`, 40, m).length).toBeLessThanOrEqual(3);
   });
 });
+
+describe('fitting a galaxy', () => {
+  const sys = (x: number, y: number, extent: number) => ({ x, y, rx: x, ry: y, extent });
+  const galaxy = (systems: ReturnType<typeof sys>[], beacons: unknown[] = []) => ({ id: 'g', x: 0, y: 0, r: 700, systems, beacons }) as unknown as Parameters<typeof fitGalaxy>[0];
+  const size = { w: 1920, h: 900, top: 76 };
+  const whole = (g: Parameters<typeof fitGalaxy>[0]) => fitGalaxy({ ...g, beacons: [{}] } as never, size);
+  it('a galaxy of a few close systems is fitted to them, not to the empty disc: bigger than the whole-disc fit, never more than 1/0.7 of it', () => {
+    const g = galaxy([sys(-150, -40, 220), sys(160, 60, 220), sys(0, 120, 200)]);
+    const v = fitGalaxy(g, size);
+    const w = whole(g);
+    expect(v.k).toBeGreaterThan(w.k * 1.1);
+    expect(v.k).toBeLessThanOrEqual(w.k / 0.7 + 1e-9);
+    // the systems are in view
+    for (const s of g.systems) {
+      const sx = s.x * v.k + v.x;
+      const sy = s.y * v.k + v.y;
+      expect(sx).toBeGreaterThan(0);
+      expect(sx).toBeLessThan(size.w);
+      expect(sy).toBeGreaterThan(size.top);
+      expect(sy).toBeLessThan(size.h);
+    }
+  });
+  it('a galaxy whose systems fill the disc, or that has dates on its rim, keeps the whole-disc fit', () => {
+    const full = galaxy([sys(-500, 0, 250), sys(500, 0, 250), sys(0, 450, 250), sys(0, -450, 250)]);
+    expect(fitGalaxy(full, size).k).toBeCloseTo(whole(full).k, 6);
+    const dated = galaxy([sys(0, 0, 200)], [{ id: 'b' }]);
+    expect(fitGalaxy(dated, size)).toEqual(whole(dated));
+    expect(fitGalaxy(galaxy([]), size)).toEqual(whole(galaxy([])));
+  });
+});
