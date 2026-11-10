@@ -88,7 +88,7 @@ test('demo host: read-only sky, linked items, layers, and positions kept across 
   await planet.click();
   const panel = page.getByRole('complementary', { name: 'Task details' });
   await expect(panel.getByText('Linked items')).toBeVisible();
-  await expect(panel.getByText('Mitre saw')).toBeVisible();
+  await expect(panel.getByText('Mitre saw', { exact: true })).toBeVisible();
   await expect(panel.getByText('+3 more in Demo host')).toBeVisible();
   await expect(panel.getByText('Kept by Demo host')).toBeVisible();
   await expect(panel.getByRole('button', { name: /^Start focus/ })).toHaveCount(0);
