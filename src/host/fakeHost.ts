@@ -14,7 +14,7 @@
  */
 import { MemoryAdapter } from '../data/storage';
 import { addDays, toDateKey } from '../lib/util';
-import type { AdoptBatch, AdoptResult, Attachment, Beacon, Caps, Collection, Galaxy, Handshake, HostTasks, OrbitHost, Planet, System, Unchanged, Verse } from './types';
+import type { AdoptBatch, AdoptResult, StartAt, Attachment, Beacon, Caps, Collection, Galaxy, Handshake, HostTasks, OrbitHost, Planet, System, Unchanged, Verse } from './types';
 
 export interface FakeHost extends OrbitHost {
   store: MemoryAdapter;
@@ -60,6 +60,8 @@ export interface FakeHostOptions {
   personal?: boolean;
   /** What adopt() does (default 'all'). */
   adopt?: AdoptMode;
+  /** `host.at`: where ORBIT goes first. */
+  at?: StartAt;
 }
 
 const FAMILIES = {
@@ -383,6 +385,7 @@ export function createFakeHost(opts: FakeHostOptions = {}): FakeHost {
     log: [],
     delay: 0,
     adoptMode: opts.adopt ?? 'all',
+    ...(opts.at ? { at: opts.at } : {}),
     async handshake() {
       host.calls.handshake++;
       const h = structuredClone(info);

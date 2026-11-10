@@ -9,9 +9,9 @@
  * itself still touches no browser storage). `?orbit-host=demo-readonly` installs the read-only one. With the
  * editable demo, `&refuse=<reason>` refuses the first change and `&locked=<text>` starts it locked; it keeps
  * ORBIT's own records as well (`&personal=0` turns that off), and `&adopt=all|some|cancel|fail` decides what its
- * "take these tasks" dialog does.
+ * "take these tasks" dialog does; `&at=planet:<id>` (or `system:`, `galaxy:`) sets where ORBIT goes first.
  */
-import { HOST_PROTOCOL, type Handshake, type OrbitHost } from './types';
+import { HOST_PROTOCOL, type Handshake, type OrbitHost, type StartAt } from './types';
 
 export type Detection =
   | { kind: 'none' }
@@ -60,6 +60,11 @@ function timeout<T>(p: Promise<T>, ms: number): Promise<T> {
   return Promise.race([p, new Promise<never>((_, rej) => setTimeout(() => rej(new Error(`no answer within ${Math.round(ms / 1000)} s`)), ms))]);
 }
 
+function startAtParam(v: string | null): StartAt | undefined {
+  const m = v?.match(/^(galaxy|system|planet):(.+)$/);
+  return m ? { [m[1]]: m[2] } : undefined;
+}
+
 const refused = (reason: string): Detection => ({ kind: 'refused', reason });
 const describe = (v: unknown) => (typeof v === 'number' || typeof v === 'string' ? String(v) : 'no protocol number');
 
@@ -84,6 +89,8 @@ export async function detectHost(win: Window = window, opts: { timeoutMs?: numbe
         // the editable demo keeps ORBIT's own records too, unless `&personal=0`
         personal: editable && p.get('personal') !== '0',
         adopt: adopt === 'some' || adopt === 'cancel' || adopt === 'fail' ? adopt : 'all',
+        // `&at=galaxy:<id>`, `system:<id>` or `planet:<id>`: where to go first (host.at)
+        at: startAtParam(p.get('at')),
       });
     } catch (e) {
       return refused(`The demo host could not start: ${e instanceof Error ? e.message : String(e)}`);

@@ -295,6 +295,13 @@ export interface AdoptResult {
   map: Record<string, string>;
 }
 
+/** `host.at`: where ORBIT goes first. The most precise id ORBIT has wins (planet, then system, then galaxy). */
+export interface StartAt {
+  galaxy?: string;
+  system?: string;
+  planet?: string;
+}
+
 /** What a host puts on `window.orbitHost` (see PROTOCOL.md). */
 export interface OrbitHost {
   protocol: number;
@@ -311,6 +318,11 @@ export interface OrbitHost {
   pick?(family: string, ctx: { planet?: string; system?: string; galaxy?: string }): Promise<boolean>;
   /** Anything else the host does in a dialog of its own. */
   action?(id: string, ctx: Record<string, string>): Promise<boolean>;
+  /**
+   * Where to fly when ORBIT starts, read once after the first verse has loaded: into this galaxy or system, or
+   * select this planet and fly to its system. Ids ORBIT does not have are ignored. Not part of the JSON documents.
+   */
+  at?: StartAt;
   /**
    * Take one of ORBIT's own systems and its tasks (offered when `handshake.caps.adopt`). The host shows a dialog
    * of its own (where to put them, what moves) and creates the tasks. Resolves `null` when the person cancels,

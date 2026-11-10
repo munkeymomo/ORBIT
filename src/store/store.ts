@@ -37,7 +37,7 @@ import { adaptVerse, DEEP_SPACE, placementKey, planetToTask, type HostExtras } f
 import { abilities, may, mayWork, needsReason, refusal, STANDALONE, type HostAbilities } from '../host/caps';
 import { createRecordWriter, type HostedWriting, type WriteOptions } from '../host/writer';
 import { HOST_FIELDS, overlayWork, WORK_FIELDS, workOf } from '../host/work';
-import type { AdoptBatch } from '../host/types';
+import type { AdoptBatch, StartAt } from '../host/types';
 
 /* ---------------- UI-only types ---------------- */
 
@@ -614,6 +614,25 @@ export function createOrbitStore(deps: StoreDeps = {}): StoreApi<OrbitState> {
       }
     };
 
+    /** `host.at`: where to go first, once the first verse is on screen. Unknown ids are ignored. */
+    const goStartAt = () => {
+      let at: StartAt | undefined;
+      try {
+        at = hostApi?.at;
+      } catch {
+        return;
+      }
+      if (!at || typeof at !== 'object') return;
+      const id = (x: unknown) => (typeof x === 'string' && x ? x : null);
+      const task = id(at.planet) ? get().tasks.find((t) => t.id === at!.planet) : undefined;
+      if (task) {
+        set({ selection: { type: 'task', id: task.id } });
+        return get().requestFlight('system', task.projectId);
+      }
+      if (id(at.system) && get().projects.some((p) => p.id === at!.system)) return get().requestFlight('system', at.system!);
+      if (id(at.galaxy) && get().groups.some((g) => g.id === at!.galaxy)) get().requestFlight('galaxy', at.galaxy!);
+    };
+
     /** After a hosted restore or erase: ORBIT's own part comes from `snap`, the host's from a fresh verse. */
     const reloadHosted = async (snap: Snapshot) => {
       const hostRows = <T extends { host?: HostRef }>(rows: T[]) => rows.filter((r) => r.host);
@@ -707,7 +726,7 @@ export function createOrbitStore(deps: StoreDeps = {}): StoreApi<OrbitState> {
         const info = hosted.info;
         const ab = abilities(info);
         const keep = <K extends keyof Snapshot>(k: K, when: boolean) => (when ? snap[k] : emptySnapshot()[k]);
-        const verseId = info.start && info.verses.some((v) => v.id === info.start) ? info.start : info.verses[0].id;
+        const verseId = startVerse(info);
         set({
           ...emptySnapshot(),
           groups: keep('groups', ab.personal),
@@ -730,6 +749,7 @@ export function createOrbitStore(deps: StoreDeps = {}): StoreApi<OrbitState> {
           const v = await hostApi!.verse(verseId);
           if (isUnchanged(v)) throw new Error('it answered “unchanged” to the first request');
           applyVerse(v);
+          goStartAt();
         } catch (e) {
           set({ host: { ...get().host!, error: `Could not load from ${ab.name}: ${e instanceof Error ? e.message : String(e)}` } });
         }
@@ -1598,6 +1618,13 @@ export function personalOnly(snap: Snapshot, hostTaskIds: Set<string>, hostIds: 
     prefs: snap.prefs,
     focus: snap.focus && snap.focus.taskId && !known(snap.focus.taskId) ? null : (snap.focus ?? null),
   };
+}
+
+/** The verse ORBIT opens first: the handshake's `start` when it is offered and not hidden, else the first shown. */
+export function startVerse(info: Handshake): string {
+  const shown = info.verses.filter((v) => v.shown !== false);
+  const offered = shown.length ? shown : info.verses;
+  return info.start && offered.some((v) => v.id === info.start) ? info.start : offered[0].id;
 }
 
 /** Views that make sense with what the host provides (all of them when standalone). */

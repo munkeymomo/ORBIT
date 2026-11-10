@@ -41,6 +41,8 @@ interface OrbitHost {
   pick?(family: string, ctx: { planet?: string; system?: string; galaxy?: string }): Promise<boolean>;
   /** Anything else the host does in a dialog of its own. */
   action?(id: string, ctx: Record<string, string>): Promise<boolean>;
+  /** Where to go first (read once, after the first verse has loaded). Not part of the JSON documents. */
+  at?: { galaxy?: string; system?: string; planet?: string };
   /** Take one of ORBIT's own systems and its tasks ("Move to <host>…"); see "Handing a system to the host". */
   adopt?(batch: {
     name: string;
@@ -48,6 +50,15 @@ interface OrbitHost {
   }): Promise<{ map: Record<string, string> } | null>;
 }
 ```
+
+## Starting up
+
+- **Which verse.** ORBIT opens the handshake's `start` verse. A verse whose `shown` is `false` is not offered:
+  if `start` is hidden or missing, ORBIT opens the first verse that is shown (the first verse when none is).
+- **Where.** When the host object has `at`, ORBIT reads it once, after the first verse has loaded, and goes
+  there: `{ planet: 't-17' }` selects that planet and flies to its system; `{ system: 's-4' }` flies into the
+  system; `{ galaxy: 'g-2' }` into the galaxy. When several are given the most precise one ORBIT has wins; ids
+  ORBIT does not have are ignored (and ORBIT opens the whole sky, as it would without `at`).
 
 ## Rules
 
@@ -63,6 +74,9 @@ interface OrbitHost {
   `locked` handshake, or any other change to it, comes and goes without a reload.
 - **Locked.** While the handshake has `locked`, ORBIT shows its text across the top and offers no change to
   host records; working state (focus, parking, the day plan) still works.
+- **Store failures.** When a write to `store` rejects, ORBIT keeps the change on screen and says once that it
+  could not be saved (not again for a few seconds, and not while the message is still showing). The same goes
+  for a refusal from `tasks`: the same reason is not shown twice at once.
 - **Positions.** Where a host galaxy or system sits is ORBIT's to remember: table `placements` in `store`,
   keyed `g|<galaxy id>` for a galaxy (shared by every verse) and `<verse id>|<system id>` for a system.
 - **Kinds and families** are the host's strings. A family has a label and a colour; ORBIT knows nothing else
