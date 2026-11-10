@@ -54,6 +54,7 @@ function StateBadge({ a }: { a: Attachment }) {
 export function WormholeMenu({ also, label }: { also?: Also[]; label: string }) {
   const verses = useOfferedVerses();
   const follow = useOrbit((s) => s.followWormhole);
+  const shown = useOrbit((s) => s.host?.shown);
   const holes = (also ?? []).filter((a) => verses.has(a.verse));
   if (!holes.length) return null;
   return (
@@ -66,8 +67,8 @@ export function WormholeMenu({ also, label }: { also?: Also[]; label: string }) 
         </IconButton>
       )}
       items={holes.map((a) => {
-        const t = wormholeText(a, verses);
-        return { label: `${t.name}${t.note ? ` — ${t.note}` : ''}`, icon: <WormholeMark size={13} />, onSelect: () => void follow(a) };
+        const t = wormholeText(a, verses, shown);
+        return { label: `${t.head}${t.note ? ` — ${t.note}` : ''}`, icon: <WormholeMark size={13} />, onSelect: () => void follow(a) };
       })}
     />
   );

@@ -20,9 +20,12 @@ export function useOfferedVerses(): Map<string, VerseInfo> {
 }
 
 /** What a wormhole row says: the target verse's name and plain word, and the host's note. */
-export function wormholeText(a: Also, verses: Map<string, VerseInfo>) {
+export function wormholeText(a: Also, verses: Map<string, VerseInfo>, shown?: string) {
   const v = verses.get(a.verse);
-  return { name: v?.name ?? a.verse, plain: v?.plain ?? '', note: a.note ?? '', offered: !!v };
+  const name = v?.name ?? a.verse;
+  // a wormhole into the verse already on screen is a way to the record's home, not a change of view
+  const here = shown != null && a.verse === shown;
+  return { name, plain: v?.plain ?? '', note: a.note ?? '', offered: !!v, here, head: here ? 'Go to where it lives' : name };
 }
 
 /** "Wormholes": one row per `also` entry; a row flies to the same record in that verse. */
@@ -37,14 +40,14 @@ export function Wormholes({ also, title = 'Wormholes' }: { also?: Also[]; title?
       <SectionTitle>{title}</SectionTitle>
       <ul className="space-y-1">
         {list.map((a, i) => {
-          const t = wormholeText(a, verses);
-          const here = a.verse === shown;
+          const t = wormholeText(a, verses, shown);
+          const here = t.here;
           return (
             <li key={`${a.verse}-${a.object ?? a.system ?? a.galaxy ?? ''}-${i}`}>
               <button
                 disabled={!t.offered}
                 onClick={() => void follow(a)}
-                title={t.offered ? `Go to ${t.name}${a.note ? `: ${a.note}` : ''}` : `${t.name} is not offered now`}
+                title={t.offered ? (here ? `Go to where it lives${a.note ? `: ${a.note}` : ''}` : `Go to ${t.name}${a.note ? `: ${a.note}` : ''}`) : `${t.name} is not offered now`}
                 className={cx('flex w-full items-center gap-3 rounded-xl border border-line px-3 py-2 text-left enabled:hover:border-[#b18cff]/60 enabled:hover:bg-surface-2 disabled:opacity-50')}
               >
                 <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-[#b18cff]/15 text-[#c9b3ff]">
@@ -52,9 +55,8 @@ export function Wormholes({ also, title = 'Wormholes' }: { also?: Also[]; title?
                 </span>
                 <span className="min-w-0 flex-1">
                   <span className="block truncate text-sm font-medium">
-                    {t.name}
-                    {t.plain && <span className="ml-1.5 text-xs font-normal text-muted">{t.plain}</span>}
-                    {here && <span className="ml-1.5 text-xs font-normal text-faint">(this view)</span>}
+                    {t.head}
+                    {t.plain && !here && <span className="ml-1.5 text-xs font-normal text-muted">{t.plain}</span>}
                   </span>
                   {t.note && <span className="block truncate text-xs text-muted">{t.note}</span>}
                 </span>

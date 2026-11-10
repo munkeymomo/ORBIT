@@ -771,10 +771,10 @@ export function createOrbitStore(deps: StoreDeps = {}): StoreApi<OrbitState> {
     const verseName = (id: string) => get().host?.info.verses.find((v) => v.id === id)?.name ?? id;
 
     /** After a switch: fly (at once) to the most precise target the verse has, and say so when it was not there. */
-    const land = (target: Landing | undefined, wormhole: boolean) => {
+    const land = (target: Landing | undefined, wormhole: boolean, instant = true) => {
       const r = resolveLanding(contentShown(), target);
       if (r.select) set({ selection: r.select });
-      set({ flight: { kind: r.flight.kind, id: r.flight.id, nonce: (get().flight?.nonce ?? 0) + 1, instant: true } });
+      set({ flight: { kind: r.flight.kind, id: r.flight.id, nonce: (get().flight?.nonce ?? 0) + 1, instant } });
       if (wormhole && r.missing) {
         const where = r.flight.kind === 'universe' ? 'the whole verse' : r.flight.kind === 'galaxy' ? 'its galaxy' : 'its system';
         get().toast({ text: `That record is not in ${verseName(get().host!.shown)} now; showing ${where} instead.` });
@@ -1009,6 +1009,11 @@ export function createOrbitStore(deps: StoreDeps = {}): StoreApi<OrbitState> {
           return false;
         }
         const seq = ++switchSeq;
+        // a wormhole into the verse already on screen: no switch, no crossfade; it flies there and selects
+        if (id === h.shown) {
+          land(target, !!o.wormhole, false);
+          return true;
+        }
         if (id === h.verseId) {
           if (h.sky) verseSwitch.emit();
           showWork();

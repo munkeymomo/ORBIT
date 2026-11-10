@@ -250,7 +250,7 @@ target verse's name and plain word, and the `note`, e.g. "3 tasks use it"); a mo
 small swirl that opens a menu of its wormholes (the moon itself still opens in the host). Following one switches
 verse and lands on the most precise target that verse has: `object` (a task or item: selected, and ORBIT flies to
 its system; an attachment id: the item holding it), else `system`, else `galaxy`, else the whole verse — and when
-the most precise one given is not there, a toast says so. The galaxy switcher is itself the galaxy wormhole.
+the most precise one given is not there, a toast says so. When the target verse is the one already on screen (a ghost's way home), the row reads "Go to where it lives" and following it only selects and flies, with no verse switch or crossfade. The galaxy switcher is itself the galaxy wormhole.
 
 ## Portals
 

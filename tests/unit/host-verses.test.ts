@@ -3,6 +3,7 @@ import { createFakeHost } from '../../src/host/fakeHost';
 import { createOrbitStore } from '../../src/store/store';
 import { MemoryAdapter } from '../../src/data/storage';
 import { errorMessage } from '../../src/lib/errors';
+import { wormholeText } from '../../src/components/host/Wormholes';
 
 /*
  * Stage 5: planets that are records (items), several verses, wormholes, portals and host actions.
@@ -481,6 +482,28 @@ describe('wormholes', () => {
     expect(h.s().host!.shown).toBe('main');
     expect(h.s().selection).toEqual({ type: 'task', id: 't-raised-bed' });
     expect(h.s().flight).toMatchObject({ kind: 'system', id: 's-beds' });
+  });
+  it('a wormhole into the verse already on screen only flies and selects: no switch, no crossfade, an animated flight', async () => {
+    const h = await hosted();
+    await h.s().showVerse('things');
+    let switches = 0;
+    const off = verseSwitch.on(() => switches++);
+    const sky = h.s().host!.sky;
+    const ghost = findItem(h.s(), 'i-drill@garden')!;
+    expect(await h.s().followWormhole(ghost.also[0])).toBe(true);
+    off();
+    expect(switches).toBe(0);
+    expect(h.s().host!.sky).toBe(sky);
+    expect(h.s().host!.shown).toBe('things');
+    expect(h.s().selection).toEqual({ type: 'item', id: 'i-drill' });
+    expect(h.s().flight).toMatchObject({ kind: 'system', id: 'th-ws-tools', instant: false });
+  });
+  it('words a wormhole: "Go to where it lives" when its verse is the one on screen, else the verse name', () => {
+    const verses = new Map([['things', { id: 'things', name: 'Things', plain: 'Tools & materials', legend: '', editable: false }]]);
+    const a = { verse: 'things', object: 'i-drill', note: 'its home: Workshop tools' };
+    expect(wormholeText(a, verses, 'things')).toMatchObject({ here: true, head: 'Go to where it lives', note: 'its home: Workshop tools' });
+    expect(wormholeText(a, verses, 'main')).toMatchObject({ here: false, head: 'Things' });
+    expect(wormholeText(a, verses)).toMatchObject({ here: false, head: 'Things' });
   });
   it('a target that is not there lands on its galaxy and says so', async () => {
     const h = await hosted();

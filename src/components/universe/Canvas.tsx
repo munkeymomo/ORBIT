@@ -2099,6 +2099,7 @@ function MoonChips({
   const openInHost = useOrbit((s) => s.openInHost);
   const follow = useOrbit((s) => s.followWormhole);
   const verses = useOfferedVerses();
+  const onScreen = useOrbit((s) => s.host?.shown);
   const shown = set.items.slice(0, 8);
   const rest = set.items.length - shown.length + set.more;
   return (
@@ -2153,8 +2154,8 @@ function MoonChips({
                   </button>
                 )}
                 items={holes.map((a: Also) => {
-                  const t = wormholeText(a, verses);
-                  return { label: `${t.name}${t.note ? ` — ${t.note}` : t.plain ? ` — ${t.plain}` : ''}`, icon: <WormholeMark size={13} />, onSelect: () => void follow(a) };
+                  const t = wormholeText(a, verses, onScreen);
+                  return { label: `${t.head}${t.note ? ` — ${t.note}` : t.plain && !t.here ? ` — ${t.plain}` : ''}`, icon: <WormholeMark size={13} />, onSelect: () => void follow(a) };
                 })}
               />
             )}
