@@ -1,4 +1,5 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { onPanelSection, takePanelSection } from './panelSection';
 import { ExternalLink, Link2, Plus, X } from 'lucide-react';
 import { useOrbit } from '../../store/store';
 import type { HostRef, Task } from '../../types';
@@ -23,11 +24,12 @@ export function KeptBy({ refOf }: { refOf: HostRef }) {
   const can = useAbilities();
   const openInHost = useOrbit((s) => s.openInHost);
   return (
-    <div className="flex items-center gap-2 rounded-xl border border-line bg-surface-2 px-3 py-2 text-sm">
-      <span className="min-w-0 flex-1 truncate text-muted">{can.storedLabel}</span>
+    // a long host name wraps; the button goes under the words when they need the room
+    <div className="flex flex-wrap items-center gap-x-2 gap-y-1.5 rounded-xl border border-line bg-surface-2 px-3 py-2 text-sm">
+      <span className="min-w-0 flex-[1_1_160px] break-words text-muted">{can.storedLabel}</span>
       {refOf.open && (
-        <Button size="sm" variant="secondary" icon={<ExternalLink size={14} />} onClick={() => openInHost(refOf.open)}>
-          {can.openLabel}
+        <Button size="sm" variant="secondary" icon={<ExternalLink size={14} />} onClick={() => openInHost(refOf.open)} className="max-w-full" title={can.openLabel}>
+          <span className="truncate">{can.openLabel}</span>
         </Button>
       )}
     </div>
@@ -318,6 +320,19 @@ export function HostSystemPanel({ id }: { id: string }) {
   const busy = stats.open > CLUTTER.tasks;
   const canCreate = may(can, ref, 'create');
   const LIST_MAX = 60;
+  // opened from the belt in the sky: show the belt list
+  const beltRef = useRef<HTMLDivElement>(null);
+  const [beltFlash, setBeltFlash] = useState(false);
+  useEffect(() => {
+    const show = () => {
+      if (takePanelSection(id) !== 'belt' || !beltRef.current) return;
+      beltRef.current.scrollIntoView({ block: 'start', behavior: 'smooth' });
+      setBeltFlash(true);
+      window.setTimeout(() => setBeltFlash(false), 1200);
+    };
+    show();
+    return onPanelSection(show);
+  }, [id]);
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
@@ -366,7 +381,11 @@ export function HostSystemPanel({ id }: { id: string }) {
         )}
 
         <BeaconList beacons={mine} />
-        {collection && <Belt c={collection} />}
+        {collection && (
+          <div ref={beltRef} className={cx('-mx-2 rounded-xl px-2 transition-[background] duration-700', beltFlash && 'bg-accent-soft')}>
+            <Belt c={collection} />
+          </div>
+        )}
 
         <section>
           <SectionTitle
