@@ -68,7 +68,7 @@ import Ajv2020 from 'ajv/dist/2020';
 import schemaText from '../../src/host/host-protocol-v1.schema.json?raw';
 import { adaptVerse, itemDiameter, ITEM_DIAMETER } from '../../src/host/adapt';
 import { offeredVerses, resolveLanding, startVerse, workVerseOf, verseSwitch } from '../../src/host/verses';
-import { buildModel } from '../../src/components/universe/model';
+import { buildModel, itemSystemRadius, projectRadius } from '../../src/components/universe/model';
 import { buildSpace, CLUTTER, LOD } from '../../src/components/universe/space';
 import { arrowCurves, planetSpots } from '../../src/components/universe/arrows';
 import { placeGalaxyLabels } from '../../src/components/universe/galaxyLabels';
@@ -261,6 +261,30 @@ describe('items never reach anything that works on tasks', () => {
     const tools = ws.systems.find((s) => s.pv.project.id === 'th-ws-tools')!;
     expect(tools.busy).toBe(false);
     expect(tools.slots.length).toBe(6); // one per item, no "add" slot
+  });
+});
+
+describe('the size of a system that holds items', () => {
+  it('goes with how many it holds: the task systems\' √ mapping and 40–80 limits, relative to the busiest in its galaxy', () => {
+    expect(itemSystemRadius(0, 30)).toBe(40);
+    expect(itemSystemRadius(2, 52)).toBeGreaterThanOrEqual(40);
+    expect(itemSystemRadius(52, 52)).toBe(80);
+    expect(itemSystemRadius(13, 52)).toBeCloseTo(40 + 40 * Math.sqrt(13 / 52), 6);
+    expect(itemSystemRadius(2, 52)).toBeLessThan(itemSystemRadius(15, 52));
+    expect(itemSystemRadius(15, 52)).toBeLessThan(itemSystemRadius(52, 52));
+    // a galaxy of small systems does not inflate them
+    expect(itemSystemRadius(3, 3)).toBeCloseTo(40 + 40 * Math.sqrt(3 / 12), 6);
+    expect(itemSystemRadius(500, 3)).toBe(80);
+  });
+  it('the model sizes the demo\'s three batch systems (14, 2 and 6 items) apart, and tasks keep the old rule', async () => {
+    const v = (await createFakeHost({ now: NOW }).verse('things')) as Verse;
+    const a = adaptVerse(v, []);
+    const model = buildModel({ projects: a.projects, tasks: [], filter: FILTER, activeTaskId: null, today: TODAY, items: a.extras.items, readOnly: true, can: abilities(null) });
+    const r = (id: string) => model.find((p) => p.project.id === id)!.radius;
+    expect(r('th-bk-run1')).toBeGreaterThan(r('th-bk-run3'));
+    expect(r('th-bk-run3')).toBeGreaterThan(r('th-bk-run2'));
+    expect(r('th-ws-fixings')).toBe(80);
+    expect(projectRadius([])).toBe(40);
   });
 });
 

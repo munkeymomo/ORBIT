@@ -50,6 +50,13 @@ export function projectRadius(tasks: Task[]): number {
   return clamp(40 + 4 * Math.sqrt(weight / 15), 40, 80);
 }
 
+/** A system standing for records: the same √ mapping and limits as a task system (40–80), from its count relative to the busiest system of its galaxy (never less than `FLOOR` so a galaxy of small systems does not inflate them). */
+export const ITEM_SYSTEM_FLOOR = 12;
+export function itemSystemRadius(count: number, largestInGalaxy: number): number {
+  if (count <= 0) return 40;
+  return clamp(40 + 40 * Math.sqrt(count / Math.max(largestInGalaxy, ITEM_SYSTEM_FLOOR, count)), 40, 80);
+}
+
 export function taskDiameter(t: Task): number {
   return t.estimateMin ? clamp(22 + Math.sqrt(t.estimateMin) * 3.2, 26, 60) : 32;
 }
@@ -127,6 +134,11 @@ export function buildModel({
     const byId = new Map(tasks.map((t) => [t.id, t]));
     const structural = filter.dueSoon || filter.highPriority || filter.parkedOnly || filter.hasLinked;
     const usesIt = (id: string) => !!filter.uses && !!attachments[id]?.items.some((a) => a.id === filter.uses);
+    const biggest = new Map<string | null, number>();
+    for (const p of projects) {
+      const n = Math.max(p.host?.count ?? 0, (items[p.id] ?? []).length);
+      if (n && !tasks.some((t) => t.projectId === p.id)) biggest.set(p.groupId, Math.max(biggest.get(p.groupId) ?? 0, n));
+    }
     return projects
       .filter((p) => !p.archived)
       .map((project) => {
@@ -166,7 +178,8 @@ export function buildModel({
         return {
           project,
           stats: projectStats(project.id, tasks, today),
-          radius: projectRadius(own),
+          // a system that holds items and no tasks is sized by how many it holds
+          radius: iv.length && !own.length ? itemSystemRadius(Math.max(project.host?.count ?? 0, iv.length), biggest.get(project.groupId) ?? 0) : projectRadius(own),
           tasks: tv,
           items: iv,
           itemCount: iv.length ? Math.max(project.host?.count ?? 0, iv.length) : 0,
