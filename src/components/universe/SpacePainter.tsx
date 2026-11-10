@@ -5,6 +5,7 @@ import { CLUTTER, clusterParticles, galaxyBeaconSpot, hashString, LOD, rng, spir
 import type { Beacon, Cluster, Family } from '../../host/types';
 import type { MoonSet } from '../../host/adapt';
 import type { Prefs } from '../../types';
+import type { LabelSide, OrbitLabel } from './labels';
 
 /** Fixed space palette: the Universe is always night sky, in either app theme. */
 const SPACE = {
@@ -41,7 +42,13 @@ export function SpacePainter({
   families = {},
   clusters = [],
   layers = { moons: true, belts: true, beacons: true },
+  planetLabels,
+  crowded,
 }: {
+  /** Where each planet's name is (moons go on the other side). */
+  planetLabels?: Map<string, OrbitLabel>;
+  /** Galaxies and systems whose dates are too close together to label one by one. */
+  crowded?: Set<string>;
   /** Hosted: family id → label and colour, for moons and belt rocks. */
   families?: Record<string, Family>;
   /** Hosted: groups of galaxies that belong together (drawn as faint constellations at universe level). */
@@ -200,10 +207,12 @@ export function SpacePainter({
 
       if (layers.beacons && gx.beacons.length) {
         const labels = universeLevel ? (sr >= 150 ? 'code' : 'none') : 'full';
+        const many = labels !== 'none' && !!crowded?.has(gx.id);
         gx.beacons.forEach((b, i) => {
           const p = galaxyBeaconSpot(gx, i);
           const [bx, by] = toS(p.x, p.y);
-          drawBeacon(g, b, bx, by, today, labels, dimF * (universeLevel ? 1 : Math.max(fade, 0.75)));
+          drawBeacon(g, b, bx, by, today, many ? 'none' : labels, dimF * (universeLevel ? 1 : Math.max(fade, 0.75)));
+          if (many && i === 0) drawDatesCount(g, gx.beacons, bx, by, dimF);
         });
       }
 
@@ -287,10 +296,12 @@ export function SpacePainter({
         }
         if (s.beacons.length && layers.beacons && k >= LOD.systems) {
           const labels = k >= LOD.planets ? 'full' : 'code';
+          const many = !!crowded?.has(s.pv.project.id);
           s.beacons.forEach((b, i) => {
             const p = systemBeaconSpot(s, i);
             const [bx, by] = toS(p.x, p.y);
-            drawBeacon(g, b, bx, by, today, labels, sDim);
+            drawBeacon(g, b, bx, by, today, many ? 'none' : labels, sDim);
+            if (many && i === 0) drawDatesCount(g, s.beacons, bx, by, sDim);
           });
         }
         if (layers.moons && k >= LOD.planets) {
@@ -298,7 +309,10 @@ export function SpacePainter({
             const sl = s.slots[i];
             if (!sl || !tv.moons) return;
             const d = clamp(sl.d * k, 14, 64);
-            drawMoons(g, tv.moons, families, sx + sl.x * k, sy + sl.y * k, d, k, sl.y < -10, (dim && !tv.matches ? 0.3 : 1) * sDim);
+            const lab = planetLabels?.get(tv.task.id);
+            // the arc sits away from the planet's name; with no name shown, on the side facing the star
+            const away = lab?.shown ? AWAY[lab.side] : Math.atan2(-sl.y, -sl.x);
+            drawMoons(g, tv.moons, families, sx + sl.x * k, sy + sl.y * k, d, k, away, (dim && !tv.matches ? 0.3 : 1) * sDim);
           });
         }
       }
@@ -352,7 +366,7 @@ export function SpacePainter({
     vg.addColorStop(1, 'rgba(0,0,0,0.45)');
     g.fillStyle = vg;
     g.fillRect(0, 0, w, h);
-  }, [view, size, galaxies, dim, today, showDeps, universeLevel, dropTarget, draggingId, families, clusters, layers]);
+  }, [view, size, galaxies, dim, today, showDeps, universeLevel, dropTarget, draggingId, families, clusters, layers, planetLabels, crowded]);
 
   return <canvas ref={ref} className="pointer-events-none absolute inset-0 h-full w-full" aria-hidden />;
 }
@@ -399,34 +413,121 @@ function drawSurveyRing(g: CanvasRenderingContext2D, cx: number, cy: number, sr:
   g.restore();
 }
 
-/** Faint constellation lines between the galaxies of each cluster, and the cluster's name above them. */
+/**
+ * Galaxies that belong together (a cluster): one faint outline around all of them and their names, with the
+ * cluster's name on the outline at the top, so it reads as "these belong together" and not as one galaxy's label.
+ */
 function drawClusters(g: CanvasRenderingContext2D, clusters: Cluster[], galaxies: GalaxyPlace[], toS: (x: number, y: number) => readonly [number, number], k: number) {
+  // every galaxy's name and counts: a cluster's name goes where it covers none of them
+  g.save();
+  g.font = `600 15px ${FONT}`;
+  const labelBoxes = galaxies.map((gx) => {
+    const [cx, cy] = toS(gx.x, gx.y);
+    return universeLabelBox(cx, cy, gx.r * k, g.measureText(gx.name.toUpperCase()).width * 1.15 + 24);
+  });
+  g.restore();
+  const taken: { x: number; y: number; w: number; h: number }[] = [];
   for (const c of clusters) {
     const members = galaxies.filter((gx) => gx.host?.cluster === c.id);
     if (!members.length) continue;
     g.save();
-    g.strokeStyle = 'rgba(207,217,255,0.16)';
-    g.lineWidth = 1;
-    g.setLineDash([1, 6]);
-    for (let i = 1; i < members.length; i++) {
-      const [ax, ay] = toS(members[i - 1].x, members[i - 1].y);
-      const [bx, by] = toS(members[i].x, members[i].y);
-      const ang = Math.atan2(by - ay, bx - ax);
-      const ra = members[i - 1].r * k * 1.12;
-      const rb = members[i].r * k * 1.12;
-      if (Math.hypot(bx - ax, by - ay) <= ra + rb) continue;
-      g.beginPath();
-      g.moveTo(ax + Math.cos(ang) * ra, ay + Math.sin(ang) * ra);
-      g.lineTo(bx - Math.cos(ang) * rb, by - Math.sin(ang) * rb);
-      g.stroke();
+    g.font = `600 15px ${FONT}`;
+    const pts: [number, number][] = [];
+    for (const m of members) {
+      const [cx, cy] = toS(m.x, m.y);
+      const sr = m.r * k;
+      const lab = universeLabelBox(cx, cy, sr, g.measureText(m.name.toUpperCase()).width * 1.15 + 24);
+      pts.push(...clusterOutlinePoints(cx, cy, sr * 1.12 + 10, lab));
     }
+    const hull = convexHull(pts);
+    if (hull.length < 3) {
+      g.restore();
+      continue;
+    }
+    g.beginPath();
+    hull.forEach(([x, y], i) => (i ? g.lineTo(x, y) : g.moveTo(x, y)));
+    g.closePath();
+    g.fillStyle = 'rgba(207,217,255,0.03)';
+    g.fill();
+    g.setLineDash([5, 6]);
+    g.lineJoin = 'round';
+    g.lineWidth = 1.2;
+    g.strokeStyle = 'rgba(207,217,255,0.32)';
+    g.stroke();
+    g.setLineDash([]);
+    // the name, on the outline (at its top, else at its bottom), centred over the members, covering no
+    // galaxy's name or counts and no other cluster's name
+    const ys = hull.map((p) => p[1]);
+    const xs = hull.map((p) => p[0]);
+    const lx = (Math.min(...xs) + Math.max(...xs)) / 2;
+    const name = c.name.toUpperCase();
+    g.font = `600 12px ${FONT}`;
+    const tw = g.measureText(name).width * 1.12 + 22;
+    // on the line, a little outside it: above the top, else below the bottom
+    const spots = [Math.min(...ys) - 15, Math.max(...ys) - 7].map((y) => ({ x: lx - tw / 2, y, w: tw, h: 22 }));
+    const hit = (r: { x: number; y: number; w: number; h: number }) =>
+      [...labelBoxes, ...taken].some((b) => r.x < b.x + b.w && b.x < r.x + r.w && r.y < b.y + b.h && b.y < r.y + r.h);
+    const spot = spots.find((r) => !hit(r)) ?? spots[0];
+    taken.push(spot);
+    g.fillStyle = 'rgba(10,12,22,0.92)';
+    g.strokeStyle = 'rgba(207,217,255,0.4)';
+    g.lineWidth = 1;
+    roundRect(g, spot.x, spot.y, tw, 22, 11);
+    g.fill();
+    g.stroke();
     g.restore();
-    const top = members.reduce((m, gx) => (gx.y - gx.r < m.y - m.r ? gx : m), members[0]);
-    const mx = members.reduce((a, gx) => a + gx.x, 0) / members.length;
-    const [lx] = toS(mx, 0);
-    const [, ly] = toS(0, top.y - top.r * 1.12);
-    text(g, c.name.toUpperCase(), lx, ly - 12, { color: '#cfd9ff', size: 11, weight: 600, align: 'center', alpha: 0.45 });
+    text(g, name.split('').join('\u200A'), lx, spot.y + 11, { color: '#dfe6ff', size: 12, weight: 600, align: 'center', alpha: 0.92 });
   }
+}
+
+/** Where a galaxy's name, chip and counts sit at universe level (as Canvas's GalaxyLabel draws them). */
+export function universeLabelBox(cx: number, cy: number, sr: number, nameW: number) {
+  const top = cy + Math.min(sr * 0.92, sr * 0.5 + 70);
+  const w = Math.max(190, nameW);
+  return { x: cx - w / 2, y: top, w, h: 88 };
+}
+
+/** Points around a galaxy (a circle) and its label box, for the outline of a cluster. */
+export function clusterOutlinePoints(cx: number, cy: number, r: number, box: { x: number; y: number; w: number; h: number }): [number, number][] {
+  const out: [number, number][] = [];
+  for (let i = 0; i < 24; i++) {
+    const a = (i / 24) * Math.PI * 2;
+    out.push([cx + Math.cos(a) * r, cy + Math.sin(a) * r]);
+  }
+  const p = 10;
+  out.push([box.x - p, box.y - p], [box.x + box.w + p, box.y - p], [box.x - p, box.y + box.h + p], [box.x + box.w + p, box.y + box.h + p]);
+  return out;
+}
+
+/** Convex hull (monotone chain), counter-clockwise. */
+export function convexHull(points: [number, number][]): [number, number][] {
+  const p = [...points].sort((a, b) => a[0] - b[0] || a[1] - b[1]);
+  if (p.length < 3) return p;
+  const cross = (o: [number, number], a: [number, number], b: [number, number]) => (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0]);
+  const lower: [number, number][] = [];
+  for (const pt of p) {
+    while (lower.length >= 2 && cross(lower[lower.length - 2], lower[lower.length - 1], pt) <= 0) lower.pop();
+    lower.push(pt);
+  }
+  const upper: [number, number][] = [];
+  for (let i = p.length - 1; i >= 0; i--) {
+    const pt = p[i];
+    while (upper.length >= 2 && cross(upper[upper.length - 2], upper[upper.length - 1], pt) <= 0) upper.pop();
+    upper.push(pt);
+  }
+  upper.pop();
+  lower.pop();
+  return lower.concat(upper);
+}
+
+function roundRect(g: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, r: number) {
+  g.beginPath();
+  g.moveTo(x + r, y);
+  g.arcTo(x + w, y, x + w, y + h, r);
+  g.arcTo(x + w, y + h, x, y + h, r);
+  g.arcTo(x, y + h, x, y, r);
+  g.arcTo(x, y, x + w, y, r);
+  g.closePath();
 }
 
 const BEACON_COLOR: Record<Beacon['state'], string> = { planned: '#ffffff', soon: SPACE.amber, late: SPACE.danger, achieved: SPACE.teal, rescoped: '#8e95a9' };
@@ -462,16 +563,24 @@ function drawBeacon(g: CanvasRenderingContext2D, b: Beacon, x: number, y: number
   text(g, `${name} · ${when}${label === 'full' ? serves : ''}`, x + 10, y, { color: col, size: 11, weight: 600, alpha: alpha * (b.state === 'rescoped' ? 0.8 : 1) });
 }
 
+/** The direction (radians, screen) away from a label on this side of its planet. */
+const AWAY: Record<LabelSide, number> = { right: Math.PI, left: 0, above: Math.PI / 2, below: -Math.PI / 2 };
+
+/** "5 dates" beside the first of a column of dates too close together to label one by one. */
+function drawDatesCount(g: CanvasRenderingContext2D, beacons: Beacon[], x: number, y: number, alpha: number) {
+  const urgent = beacons.find((b) => b.state === 'late') ?? beacons.find((b) => b.state === 'soon');
+  text(g, `${beacons.length} dates`, x + 10, y, { color: urgent ? BEACON_COLOR[urgent.state] : '#ffffff', size: 11, weight: 600, alpha });
+}
+
 /** Moons on a planet: one dot per attachment, coloured by family; at most five, then "+n". */
-function drawMoons(g: CanvasRenderingContext2D, set: MoonSet, families: Record<string, Family>, px: number, py: number, d: number, k: number, labelAbove: boolean, alpha: number) {
+function drawMoons(g: CanvasRenderingContext2D, set: MoonSet, families: Record<string, Family>, px: number, py: number, d: number, k: number, mid: number, alpha: number) {
   const shown = set.items.slice(0, CLUTTER.moons);
   const extra = set.items.length - shown.length + set.more;
   if (!shown.length && !extra) return;
   const orbit = d / 2 + 9;
   const mr = clamp(1.6 + k * 1.2, 2.2, 4);
   const step = (mr * 2 + 3.5) / orbit;
-  // the arc sits on the side away from the planet's name
-  const mid = labelAbove ? Math.PI / 2 : -Math.PI / 2;
+  // the arc is centred on `mid` (away from the planet's name)
   const start = mid - (step * (shown.length - 1)) / 2;
   g.save();
   g.globalAlpha = 0.3 * alpha;
@@ -549,45 +658,74 @@ function drawBelt(g: CanvasRenderingContext2D, s: SystemPlace, families: Record<
   for (let i = 0; i < dust; i++) {
     const a = r() * Math.PI * 2;
     const rr = R + (r() - 0.5) * band * 1.2;
-    g.globalAlpha = (belt.haze ? 0.25 + r() * 0.35 : 0.22 + r() * 0.2) * alpha;
+    g.globalAlpha = (belt.haze ? 0.25 + r() * 0.35 : 0.14 + r() * 0.14) * alpha;
     const sz = r() < 0.15 ? 1.8 : 1.1;
     g.fillRect(sx + Math.cos(a) * rr, sy + Math.sin(a) * rr, sz, sz);
   }
   const items = belt.collection.items ?? [];
   if (!belt.haze) {
-    const size = clamp(2.6 * Math.sqrt(k) * 1.6, 2, 4.6);
+    // one rock per item, big enough to see and in its family's colour, with a dark rim so it stands off the dust
+    const size = clamp(5.6 * Math.sqrt(k), 4, 9.5);
     items.forEach((it, i) => {
       const a = (i / items.length) * Math.PI * 2 + 0.35 + r() * 0.15;
-      const rr = R + (r() - 0.5) * 12 * k;
+      const rr = R + (r() - 0.5) * 10 * k;
+      const cx = sx + Math.cos(a) * rr;
+      const cy = sy + Math.sin(a) * rr;
       const col = famColor(families, it.family);
-      g.globalAlpha = (it.state === 'live' ? 0.9 : 0.55) * alpha;
-      g.fillStyle = col;
-      g.strokeStyle = col;
       g.beginPath();
-      for (let v = 0; v < 6; v++) {
-        const va = (v / 6) * Math.PI * 2 + i;
-        const vr = size * (0.72 + 0.5 * ((hashString(it.id + v) % 100) / 100));
-        const X = sx + Math.cos(a) * rr + Math.cos(va) * vr;
-        const Y = sy + Math.sin(a) * rr + Math.sin(va) * vr;
+      for (let v = 0; v < 7; v++) {
+        const va = (v / 7) * Math.PI * 2 + i;
+        const vr = size * (0.78 + 0.4 * ((hashString(it.id + v) % 100) / 100));
+        const X = cx + Math.cos(va) * vr;
+        const Y = cy + Math.sin(va) * vr;
         if (v) g.lineTo(X, Y);
         else g.moveTo(X, Y);
       }
       g.closePath();
-      if (it.state === 'live') g.fill();
-      else {
-        g.lineWidth = 1.1;
+      g.globalAlpha = alpha;
+      g.lineWidth = 1.6;
+      g.strokeStyle = 'rgba(4,5,10,0.9)';
+      g.stroke();
+      g.shadowColor = col;
+      g.shadowBlur = it.state === 'live' ? 8 : 0;
+      g.fillStyle = it.state === 'live' ? col : '#0a0c16';
+      g.globalAlpha = (it.state === 'live' ? 1 : 0.9) * alpha;
+      g.fill();
+      g.shadowBlur = 0;
+      if (it.state !== 'live') {
+        g.lineWidth = 1.4;
+        g.strokeStyle = col;
         g.stroke();
       }
     });
   }
   g.restore();
-  // summary by family (never a list in the sky)
+  // what it is, in words: how many are held here that no task uses yet, then the families, each with its colour
   const counts = new Map<string, number>();
   if (belt.haze && belt.collection.counts) for (const [f, n] of Object.entries(belt.collection.counts)) counts.set(f, n);
   else for (const it of items) counts.set(it.family, (counts.get(it.family) ?? 0) + 1);
-  const parts = [...counts].map(([f, n]) => `${famLabel(families, f)} ${n}`);
-  const head = belt.haze ? `${belt.collection.total} held here` : 'Held here';
-  text(g, parts.length ? `${head} · ${parts.join(' · ')}` : head, sx, sy + R + 16 * Math.max(1, k), { color: '#aab3cc', size: 11, align: 'center', alpha: 0.95 * alpha });
+  const total = belt.collection.total;
+  const y0 = sy + R + 14 * Math.max(1, k) + 4;
+  text(g, `${total} item${total === 1 ? '' : 's'} held here that no task uses yet`, sx, y0, { color: '#c9d2ee', size: 11.5, weight: 600, align: 'center', alpha: 0.95 * alpha });
+  const parts = [...counts].sort((a, b) => b[1] - a[1]).map(([f, n]) => ({ f, t: `${famLabel(families, f)} ${n}` }));
+  if (!parts.length) return;
+  g.save();
+  g.font = `500 11px ${FONT}`;
+  const widths = parts.map((p) => g.measureText(p.t).width + 12);
+  g.restore();
+  const gapW = 12;
+  let x = sx - (widths.reduce((a, b) => a + b, 0) + gapW * (parts.length - 1)) / 2;
+  parts.forEach((p, i) => {
+    g.save();
+    g.globalAlpha = alpha;
+    g.fillStyle = famColor(families, p.f);
+    g.beginPath();
+    g.arc(x + 3.5, y0 + 16, 3.5, 0, Math.PI * 2);
+    g.fill();
+    g.restore();
+    text(g, p.t, x + 11, y0 + 16, { color: '#aab3cc', size: 11, alpha: 0.95 * alpha });
+    x += widths[i] + gapW;
+  });
 }
 
 /** A system with too many open tasks to draw: a ring of small dots, one per task, and the count. */
