@@ -6,11 +6,14 @@ import { useAbilities } from '../../host/useAbilities';
 /** Across the top while the host refuses changes to its records (handshake.locked); its text says why. */
 export function LockedBanner() {
   const can = useAbilities();
+  const [open, setOpen] = useState(false);
   if (!can.locked) return null;
+  const full = `${can.locked}${can.work ? ` Focus, parking and day plans still work; changes to ${can.name}’s records wait until it allows them.` : ''}`;
   return (
     <div role="status" aria-label="Changes paused" className="flex items-start gap-3 border-b border-line bg-surface-2 px-4 py-2.5 text-[13px] text-text md:px-6">
       <Lock size={15} className="mt-0.5 shrink-0 text-amber" />
-      <p className="flex-1 leading-snug">
+      {/* two lines at most; the whole text on hover, or by clicking it */}
+      <p data-testid="locked-text" title={full} onClick={() => setOpen((o) => !o)} className={`flex-1 cursor-pointer leading-snug ${open ? '' : 'line-clamp-2'}`}>
         <span className="font-semibold">{can.locked}</span>
         {can.work && <span className="text-muted"> Focus, parking and day plans still work; changes to {can.name}’s records wait until it allows them.</span>}
       </p>

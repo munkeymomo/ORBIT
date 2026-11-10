@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { buildModel } from '../../src/components/universe/model';
-import { buildSpace, fitSystem, fitUniverse, MAX_K, PADS, systemBeaconSpot, UNIVERSE_LABEL_ROOM, type SpaceExtras, type Size } from '../../src/components/universe/space';
+import { buildSpace, contextAt, fitGalaxy, fitSystem, fitUniverse, MAX_K, PADS, systemBeaconSpot, UNIVERSE_LABEL_ROOM, type SpaceExtras, type Size } from '../../src/components/universe/space';
 import {
   collapseWhenCrowded,
   ellipsize,
@@ -210,5 +210,19 @@ describe('clusters', () => {
   });
   it('convexHull drops points inside', () => {
     expect(convexHull([[0, 0], [10, 0], [10, 10], [0, 10], [5, 5]]).length).toBe(4);
+  });
+});
+
+describe('the level of the view', () => {
+  const one = (r: number) => [{ id: 'g', x: 0, y: 0, r, systems: [] }] as unknown as Parameters<typeof contextAt>[0];
+  it('one galaxy at the whole-universe fit is universe level, whatever the toolbar and banner measure', () => {
+    for (const top of [76, 120, 190, 260]) {
+      for (const r of [150, 300, 700]) {
+        const size = { w: 1600, h: 900, top };
+        const gs = one(r);
+        expect(contextAt(gs, fitUniverse(gs, size), size).galaxy).toBeNull();
+        expect(contextAt(gs, fitGalaxy(gs[0], size), size).galaxy?.id).toBe('g');
+      }
+    }
   });
 });

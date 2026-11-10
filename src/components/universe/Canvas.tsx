@@ -256,7 +256,11 @@ export function UniverseCanvas({ onNewSystem, onNewGalaxy }: { onNewSystem: (gal
     if (!size.w) return;
     if (!viewRef.current) {
       const v = viewFor({ kind: 'universe' });
-      if (v) setView(v);
+      if (v) {
+        // kept framed like any flight to the universe: a toolbar or banner that changes height refits it
+        locked.current = { kind: 'universe' };
+        setView(v);
+      }
       return;
     }
     if (locked.current && !anim.current) {

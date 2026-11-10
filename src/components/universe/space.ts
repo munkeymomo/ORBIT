@@ -248,6 +248,9 @@ export function fitUniverse(galaxies: GalaxyPlace[], size: Size): View {
   return { k, x: size.w / 2 - ((minX + maxX) / 2) * k, y: y0 - minY * k };
 }
 
+/** How much closer than the whole-universe fit a view must be to count as inside a galaxy. */
+export const ENTER_RATIO = 1.04;
+
 export function fitGalaxy(g: GalaxyPlace, size: Size): View {
   return fitCircle(g.x, g.y, g.r + 60, size, 0.9);
 }
@@ -300,10 +303,16 @@ export function contextAt(galaxies: GalaxyPlace[], view: View, size: Size): { ga
   const cy = (top + (size.h - top - PADS.bottom) / 2 - view.y) / view.k;
   let galaxy: GalaxyPlace | null = null;
   let best = Infinity;
+  // The whole-universe fit (made with the same measured `size`, toolbar and all) is never "inside" a galaxy, even
+  // when there is only one and it fills most of the view: entering means being clearly closer than that.
+  const overview = fitUniverse(galaxies, size).k;
+  if (view.k < overview * ENTER_RATIO) return { galaxy: null, system: null };
   for (const g of galaxies) {
     const fill = (2 * g.r * view.k) / usable;
     const d = Math.hypot(g.x - cx, g.y - cy) / g.r;
-    if (fill >= 0.6 && d < 1.0 && d < best) {
+    // a small galaxy cannot fill the view even when flown to (fitGalaxy stops at 0.9): being near that fit counts
+    const entered = fill >= 0.6 || view.k >= 0.85 * fitGalaxy(g, size).k;
+    if (entered && d < 1.0 && d < best) {
       best = d;
       galaxy = g;
     }
