@@ -97,7 +97,8 @@ test('the filter “Has something changed” highlights marked planets and dims 
   await expect.poll(() => fade('n-pond')).toBe(1);
 });
 
-test('standalone ORBIT has no “Has something changed” filter, and the work verse’s Today does not mention changes', async ({ page }) => {
+test('standalone ORBIT has no “Has something changed” filter, and the work verse’s Today does not mention changes', async ({ page }, info) => {
+  test.skip(info.project.name === 'phone', 'desktop canvas');
   await page.goto('/#universe');
   await page.getByRole('button', { name: /example workspace/i }).click();
   await page.waitForTimeout(500);
