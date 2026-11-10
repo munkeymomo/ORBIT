@@ -26,6 +26,8 @@ import { SLOTS, addDays, addMinutesToHHMM, currentSlot, fmtMinutes, friendlyDay,
 import { Button, IconButton, Input, Menu, Toggle, cx } from '../ui/primitives';
 import { DueBadge, EnergyIcon, PriorityBars } from '../ui/visuals';
 import { useSuggestions } from '../next/useSuggestions';
+import { BEACON_TONE, BeaconDiamond, beaconWhen } from '../task/HostPanels';
+import type { Beacon } from '../../host/types';
 
 type Entry = { item: DayItem; task: Task; project: Project | undefined };
 
@@ -146,6 +148,8 @@ export function DayBoard() {
             </Button>
           )}
         </div>
+
+        <ComingUp />
 
         <div className={cx('min-h-0 flex-1', desktop ? 'grid grid-cols-[minmax(0,1fr)_300px]' : 'overflow-y-auto')}>
           <div className={cx(desktop ? 'grid min-h-0 grid-cols-4 gap-3 overflow-x-auto p-4' : 'space-y-4 p-4')}>
@@ -405,5 +409,43 @@ function TrayItem({ task, project, date }: { task: Task; project: Project | unde
         items={SLOTS.map((s) => ({ label: s.label, onSelect: () => planTask(task.id, date, s.id) }))}
       />
     </li>
+  );
+}
+
+/**
+ * Hosted: the host's dates that are close or past (beacons whose state is `soon` or `late`), in one slim line
+ * above the day. They are dates, not tasks: they cannot be planned or focused. A click opens the date's panel.
+ */
+function ComingUp() {
+  const beacons = useOrbit((s) => s.host?.beacons);
+  const select = useOrbit((s) => s.select);
+  const today = toDateKey(Date.now());
+  const near = useMemo(() => {
+    const due = (b: Beacon) => b.due ?? '9999-12-31';
+    return (beacons ?? []).filter((b) => b.state === 'soon' || b.state === 'late').sort((a, b) => due(a).localeCompare(due(b)) || a.title.localeCompare(b.title));
+  }, [beacons]);
+  if (!near.length) return null;
+  return (
+    <section aria-label="Coming up" className="flex items-center gap-2 overflow-x-auto border-b border-line px-4 py-1.5 md:px-6">
+      <span className="shrink-0 text-[11px] font-semibold tracking-[0.08em] text-muted uppercase">Coming up</span>
+      <ul className="flex min-w-0 items-center gap-1">
+        {near.map((b) => (
+          <li key={b.id} className="shrink-0">
+            <button
+              onClick={() => select({ type: 'beacon', id: b.id })}
+              className="flex max-w-[320px] items-center gap-2 rounded-lg px-2 py-1 text-left text-[13px] hover:bg-surface-2"
+              title={`${b.title}${b.due ? ` · ${friendlyDay(b.due, today)}` : ''}`}
+            >
+              <BeaconDiamond b={b} />
+              <span className="min-w-0 truncate">
+                {b.code && <span className="mr-1 font-semibold">{b.code}</span>}
+                {b.title}
+              </span>
+              <span className={cx('shrink-0 text-xs', BEACON_TONE[b.state])}>{beaconWhen(b, today)}</span>
+            </button>
+          </li>
+        ))}
+      </ul>
+    </section>
   );
 }

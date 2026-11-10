@@ -167,7 +167,7 @@ function Belt({ c }: { c: Collection }) {
   );
 }
 
-const BEACON_TONE: Record<Beacon['state'], string> = {
+export const BEACON_TONE: Record<Beacon['state'], string> = {
   planned: 'text-text',
   soon: 'text-amber',
   late: 'text-danger',
@@ -175,7 +175,7 @@ const BEACON_TONE: Record<Beacon['state'], string> = {
   rescoped: 'text-faint',
 };
 
-function beaconWhen(b: Beacon, today: string) {
+export function beaconWhen(b: Beacon, today: string) {
   if (b.state === 'achieved') return 'achieved';
   if (b.state === 'rescoped') return 'rescoped';
   if (!b.due) return b.state;
@@ -183,7 +183,7 @@ function beaconWhen(b: Beacon, today: string) {
   return d < 0 ? `${-d} days late` : d === 0 ? 'today' : `in ${d} days`;
 }
 
-function BeaconDiamond({ b }: { b: Beacon }) {
+export function BeaconDiamond({ b }: { b: Beacon }) {
   const col = { planned: '#ffffff', soon: '#f5b544', late: '#f2766b', achieved: '#2dd4bf', rescoped: '#8e95a9' }[b.state];
   return <span className={cx('block h-2.5 w-2.5 shrink-0 rotate-45 border-[1.6px]', b.state === 'rescoped' && 'border-dashed')} style={{ borderColor: col, background: b.state === 'achieved' ? col : 'transparent' }} aria-hidden />;
 }
