@@ -110,7 +110,8 @@ describe('the fake host speaks protocol 1 (validated against the JSON Schema)', 
 
   it('offers no capabilities by default; this build supports write, work, personal and adopt', async () => {
     const info = await createFakeHost().handshake();
-    expect(info.caps).toEqual({ write: false, personal: false, work: false });
+    expect(info.caps).toMatchObject({ write: false, personal: false, work: false });
+    expect(info.caps.actions).toEqual(['new-notebook', 'new-note', 'galaxy-summary']);
     expect(abilities(info)).toMatchObject({ write: false, personal: false, work: false, capture: false, plans: false, adopt: false });
     expect(BUILD_SUPPORTS).toEqual({ write: true, personal: true, work: true, adopt: true });
     // a host offering everything gets what this build supports
@@ -131,7 +132,10 @@ describe('adaptVerse', () => {
     expect(a.groups.map((g) => g.id)).toEqual(v.galaxies.map((g) => g.id));
     expect(a.projects.map((p) => p.id)).toEqual(v.systems.map((s) => s.id));
     expect(a.tasks.length).toBe(v.planets.filter((p) => p.type === 'task').length);
-    expect(a.skipped).toBe(1); // the one item planet
+    expect(a.skipped).toBe(0);
+    // the one item planet is an item, never a task
+    expect(a.extras.items['s-recipes'].map((i) => i.id)).toEqual(['i-oven']);
+    expect(a.tasks.some((t) => t.id === 'i-oven')).toBe(false);
     const beds = a.projects.find((p) => p.id === 's-beds')!;
     expect(beds).toMatchObject({ groupId: 'g-garden', name: 'Vegetable beds', description: 'Soil test results due back in two weeks.' });
     expect(beds.host).toMatchObject({ id: 's-beds', kind: 'system', verse: 'main', code: 'GD-1', caps: {} });

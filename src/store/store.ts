@@ -32,9 +32,10 @@ import { uid, toDateKey } from '../lib/util';
 import { nextUnusedColor } from '../lib/colors';
 import { buildExample } from '../data/example';
 import { findFreeSpot, nextGalaxySpot, spiralLayout, SYSTEM_SPACING, type Pt } from '../data/layout';
-import type { Handshake, Open, OrbitHost, Planet } from '../host/types';
+import type { Also, Handshake, Open, OrbitHost, Planet, Verse } from '../host/types';
 import { HOST_PROTOCOL, isUnchanged } from '../host/types';
-import { adaptVerse, DEEP_SPACE, placementKey, planetToTask, type HostExtras } from '../host/adapt';
+import { adaptVerse, DEEP_SPACE, NO_EXTRAS, placementKey, planetToTask, type HostExtras } from '../host/adapt';
+import { offeredVerses, resolveLanding, startVerse, verseSwitch, workVerseOf, type Landing } from '../host/verses';
 import { abilities, may, mayWork, needsReason, refusal, STANDALONE, type HostAbilities } from '../host/caps';
 import { createRecordWriter, type HostedWriting, type WriteOptions } from '../host/writer';
 import { HOST_FIELDS, overlayWork, WORK_FIELDS, workOf } from '../host/work';
@@ -42,7 +43,7 @@ import type { AdoptBatch, StartAt } from '../host/types';
 
 /* ---------------- UI-only types ---------------- */
 
-export type Selection = { type: 'task' | 'project' | 'group' | 'beacon'; id: string } | null;
+export type Selection = { type: 'task' | 'project' | 'group' | 'beacon' | 'item'; id: string } | null;
 
 /** A request for the Universe to fly somewhere (from search, panels, other views). */
 export interface Flight {
@@ -50,6 +51,8 @@ export interface Flight {
   /** Galaxy id (or 'deep-space'), or project id for a system. */
   id: string | null;
   nonce: number;
+  /** Jump there at once (after switching verse: the crossfade hides the jump). */
+  instant?: boolean;
 }
 
 export interface Toast {
@@ -123,11 +126,31 @@ export interface UniverseFilter {
  */
 export interface HostSlice extends HostExtras {
   info: Handshake;
+  /**
+   * The WORK verse: the one whose tasks are ORBIT's `tasks` and whose galaxies and systems are in `groups` and
+   * `projects` (the first offered editable verse, else the start verse). It stays loaded and refreshed whichever
+   * verse is on screen, so the dock, focus, Today, Next, the inbox, Insights and search always have its tasks.
+   * The extras of this slice (families, moons, belts, dates, clusters, items, arrows) are the work verse's.
+   */
   verseId: string;
-  /** The rev of the verse on screen ('' before the first one arrives). */
+  /** The rev of the work verse ('' before the first one arrives). */
   rev: string;
+  /** The verse on screen: the work verse, or another whose records are in `sky`. */
+  shown: string;
+  /** The verse on screen when it is not the work verse: its own galaxies, systems, items and extras (no tasks). */
+  sky: SkyVerse | null;
   /** Set when the host could not be reached or answered with something unusable. */
   error?: string;
+}
+
+/** A verse on screen other than the work verse. Its records never mix with `groups`, `projects` or `tasks`. */
+export interface SkyVerse extends HostExtras {
+  verseId: string;
+  rev: string;
+  groups: Group[];
+  projects: Project[];
+  /** Where deep space sits in it, or null when nothing lives there. */
+  deepSpace: Pt | null;
 }
 
 export interface InitOptions {
@@ -171,8 +194,19 @@ export interface OrbitState extends Snapshot {
   detachLinked: (taskId: string, attachmentId: string) => void;
   /** The host shows its own picker for this family and attaches what was chosen; then ORBIT refreshes. */
   pickLinked: (family: string, ctx: { planet?: string; system?: string; galaxy?: string }) => Promise<void>;
-  /** Anything else the host does in a dialog of its own (an id from handshake.caps.actions). */
+  /**
+   * Anything else the host does in a dialog of its own (a verse's, galaxy's or system's `actions`, or an id from
+   * handshake.caps.actions). True when the host changed something (then the verse on screen is refreshed).
+   */
   hostAction: (id: string, ctx: Record<string, string>) => Promise<boolean>;
+  /**
+   * Put another verse on screen (hosted, offered verses only), then land on the most precise target given (an
+   * object, a system, a galaxy; else the whole verse). The last payload of each verse is kept in memory, so
+   * switching back is instant, and refreshed with `since`. Resolves false when nothing changed.
+   */
+  showVerse: (id: string, land?: Landing, opts?: { wormhole?: boolean }) => Promise<boolean>;
+  /** Follow a wormhole: the same record (or galaxy) in another verse. */
+  followWormhole: (a: Also) => Promise<boolean>;
   /** Show something on a page of the host's own. */
   openInHost: (target: Open | undefined) => void;
   /** What may be done here (everything when standalone). */
@@ -311,8 +345,9 @@ export function createOrbitStore(deps: StoreDeps = {}): StoreApi<OrbitState> {
     const can = (): HostAbilities => (get()?.host ? abilities(get().host!.info) : STANDALONE);
     /** The host reference of a record in memory, if a host owns it. */
     const ownerOf = (table: TableName, id: string): HostRef | undefined => {
-      if (table === 'groups') return get().groups.find((g) => g.id === id)?.host;
-      if (table === 'projects') return get().projects.find((p) => p.id === id)?.host;
+      const sky = get().host?.sky;
+      if (table === 'groups') return (sky?.groups.find((g) => g.id === id) ?? get().groups.find((g) => g.id === id))?.host;
+      if (table === 'projects') return (sky?.projects.find((p) => p.id === id) ?? get().projects.find((p) => p.id === id))?.host;
       if (table === 'tasks') return get().tasks.find((t) => t.id === id)?.host;
       return undefined;
     };
@@ -483,6 +518,21 @@ export function createOrbitStore(deps: StoreDeps = {}): StoreApi<OrbitState> {
       return next;
     };
 
+    /** A galaxy or system of the verse on screen when it is not the work verse: only its place changes. */
+    const patchSky = (table: 'groups' | 'projects', id: string, patch: object) => {
+      const h = get().host;
+      const sky = h?.sky;
+      if (!h || !sky) return null;
+      const rows = sky[table] as (Group | Project)[];
+      const idx = rows.findIndex((r) => r.id === id);
+      if (idx < 0) return null;
+      const next = stamp({ ...rows[idx], ...patch } as Group | Project);
+      const copy = rows.slice();
+      copy[idx] = next;
+      set({ host: { ...h, sky: { ...sky, [table]: copy } } });
+      return next;
+    };
+
     /** True when some project lives in deep space (no galaxy, or a galaxy that no longer exists). */
     const deepInUse = (exceptId?: string) => {
       const ids = new Set(get().groups.map((g) => g.id));
@@ -604,6 +654,7 @@ export function createOrbitStore(deps: StoreDeps = {}): StoreApi<OrbitState> {
       const sel = get().selection;
       const still =
         !sel ||
+        !!get().host?.sky ||
         (sel.type === 'task' ? tasks.some((t) => t.id === sel.id) : sel.type === 'project' ? projects.some((p) => p.id === sel.id) : sel.type === 'group' ? groups.some((g) => g.id === sel.id) : ad.extras.beacons.some((b) => b.id === sel.id));
       set({
         groups,
@@ -614,11 +665,91 @@ export function createOrbitStore(deps: StoreDeps = {}): StoreApi<OrbitState> {
         prefs: ad.deepSpace ? { ...get().prefs, deepSpace: ad.deepSpace } : get().prefs,
         host: { ...get().host!, ...ad.extras, verseId: ad.verseId, rev: ad.rev, error: undefined },
       });
+      verseCache.set(v.verse, v);
       writer.seed(hostTasks);
       // the host says done: a parked flag left from before is cleared
       if (stale.length) {
         set({ taskWork: get().taskWork.map((w) => stale.find((x) => x.id === w.id) ?? w) });
         putMany('taskWork', stale);
+      }
+    };
+
+    /** The last full payload of each verse seen this session (memory only): switching back is instant. */
+    const verseCache = new Map<string, Verse>();
+    /** Bumped on every switch, so a slow answer for a verse no longer wanted is dropped. */
+    let switchSeq = 0;
+
+    /** Galaxies where they sit now (the work verse's, ORBIT's own included): a galaxy keeps its place in every verse. */
+    const centresNow = () => new Map(get().groups.map((g) => [g.id, { x: g.x, y: g.y }]));
+
+    /** Builds the sky of a verse that is not the work verse: its host records only (no tasks, no personal records). */
+    const skyFrom = (v: Verse): SkyVerse => {
+      const ad = adaptVerse(v, get().placements, { centres: centresNow() });
+      return { ...ad.extras, verseId: ad.verseId, rev: ad.rev, groups: ad.groups, projects: ad.projects, deepSpace: ad.deepSpace };
+    };
+
+    /** Is this selection something the verse on screen has? */
+    const selectionShown = (sel: Selection, sky: SkyVerse | null): boolean => {
+      if (!sel) return true;
+      if (!sky) {
+        const h = get().host;
+        if (sel.type === 'task') return get().tasks.some((t) => t.id === sel.id);
+        if (sel.type === 'project') return get().projects.some((p) => p.id === sel.id);
+        if (sel.type === 'group') return get().groups.some((g) => g.id === sel.id);
+        if (sel.type === 'beacon') return !!h?.beacons.some((b) => b.id === sel.id);
+        return !!h && Object.values(h.items).some((l) => l.some((i) => i.id === sel.id));
+      }
+      if (sel.type === 'task') return false;
+      if (sel.type === 'project') return sky.projects.some((p) => p.id === sel.id);
+      if (sel.type === 'group') return sky.groups.some((g) => g.id === sel.id);
+      if (sel.type === 'beacon') return sky.beacons.some((b) => b.id === sel.id);
+      return Object.values(sky.items).some((l) => l.some((i) => i.id === sel.id));
+    };
+
+    /** Puts a verse other than the work verse on screen (or refreshes it); the selection stays if the verse has it. */
+    const applySky = (v: Verse) => {
+      verseCache.set(v.verse, v);
+      const sky = skyFrom(v);
+      const sel = get().selection;
+      set({ host: { ...get().host!, shown: v.verse, sky }, selection: selectionShown(sel, sky) ? sel : null });
+    };
+
+    /** The work verse back on screen (it is always loaded). */
+    const showWork = () => {
+      const h = get().host!;
+      const sel = get().selection;
+      set({ host: { ...h, shown: h.verseId, sky: null } });
+      if (!selectionShown(sel, null)) set({ selection: null });
+    };
+
+    /** What the verse on screen holds, for landing. */
+    const contentShown = () => {
+      const h = get().host!;
+      return h.sky
+        ? { groups: h.sky.groups, projects: h.sky.projects, tasks: [] as Task[], items: h.sky.items }
+        : { groups: get().groups, projects: get().projects, tasks: get().tasks, items: h.items };
+    };
+
+    const verseName = (id: string) => get().host?.info.verses.find((v) => v.id === id)?.name ?? id;
+
+    /** After a switch: fly (at once) to the most precise target the verse has, and say so when it was not there. */
+    const land = (target: Landing | undefined, wormhole: boolean) => {
+      const r = resolveLanding(contentShown(), target);
+      if (r.select) set({ selection: r.select });
+      set({ flight: { kind: r.flight.kind, id: r.flight.id, nonce: (get().flight?.nonce ?? 0) + 1, instant: true } });
+      if (wormhole && r.missing) {
+        const where = r.flight.kind === 'universe' ? 'the whole verse' : r.flight.kind === 'galaxy' ? 'its galaxy' : 'its system';
+        get().toast({ text: `That record is not in ${verseName(get().host!.shown)} now; showing ${where} instead.` });
+      }
+    };
+
+    /** The verse on screen is no longer offered (hidden, or gone from the handshake): back to the work verse. */
+    const keepShownOffered = () => {
+      const h = get().host;
+      if (!h?.sky) return;
+      if (!offeredVerses(h.info).some((v) => v.id === h.shown)) {
+        verseSwitch.emit();
+        showWork();
       }
     };
 
@@ -632,6 +763,15 @@ export function createOrbitStore(deps: StoreDeps = {}): StoreApi<OrbitState> {
       }
       if (!at || typeof at !== 'object') return;
       const id = (x: unknown) => (typeof x === 'string' && x ? x : null);
+      const sky = get().host?.sky;
+      if (sky) {
+        // a verse other than the work verse opened first: its planets are items
+        const c = contentShown();
+        const r = resolveLanding(c, { object: id(at.planet) ?? undefined, system: id(at.system) ?? undefined, galaxy: id(at.galaxy) ?? undefined });
+        if (r.flight.kind === 'universe') return;
+        if (r.select) set({ selection: r.select });
+        return get().requestFlight(r.flight.kind, r.flight.id);
+      }
       const task = id(at.planet) ? get().tasks.find((t) => t.id === at!.planet) : undefined;
       if (task) {
         set({ selection: { type: 'task', id: task.id } });
@@ -667,6 +807,9 @@ export function createOrbitStore(deps: StoreDeps = {}): StoreApi<OrbitState> {
       });
       const h = get().host;
       if (!hostApi || !h) return;
+      // the whole sky is read again; the work verse comes back on screen
+      verseCache.clear();
+      if (h.sky) set({ host: { ...h, shown: h.verseId, sky: null } });
       try {
         const v = await hostApi.verse(h.verseId); // in full: positions and working state may all have changed
         if (isUnchanged(v)) throw new Error('it answered “unchanged” to a full request');
@@ -734,7 +877,17 @@ export function createOrbitStore(deps: StoreDeps = {}): StoreApi<OrbitState> {
         const info = hosted.info;
         const ab = abilities(info);
         const keep = <K extends keyof Snapshot>(k: K, when: boolean) => (when ? snap[k] : emptySnapshot()[k]);
-        const verseId = startVerse(info);
+        const start = startVerse(info);
+        const verseId = workVerseOf(info);
+        // `host.at.verse` may say which verse to open first (when it is offered)
+        let atVerse: string | undefined;
+        try {
+          const v = hostApi?.at?.verse;
+          if (typeof v === 'string' && offeredVerses(info).some((x) => x.id === v)) atVerse = v;
+        } catch {
+          /* a host whose `at` throws: start as usual */
+        }
+        const first = atVerse ?? start;
         set({
           ...emptySnapshot(),
           groups: keep('groups', ab.personal),
@@ -751,12 +904,18 @@ export function createOrbitStore(deps: StoreDeps = {}): StoreApi<OrbitState> {
           storageKind: adapter.kind,
           storageError,
           hostRefusal: null,
-          host: { info, verseId, rev: '', families: {}, attachments: {}, collections: {}, beacons: [], clusters: [] },
+          host: { info, verseId, rev: '', shown: verseId, sky: null, ...NO_EXTRAS },
         });
         try {
           const v = await hostApi!.verse(verseId);
           if (isUnchanged(v)) throw new Error('it answered “unchanged” to the first request');
           applyVerse(v);
+          if (first !== verseId) {
+            // the verse opened first is not the one whose tasks ORBIT works on: both are loaded
+            const sv = await hostApi!.verse(first);
+            if (isUnchanged(sv)) throw new Error('it answered “unchanged” to the first request');
+            applySky(sv);
+          }
           goStartAt();
         } catch (e) {
           set({ host: { ...get().host!, error: `Could not load from ${ab.name}: ${errorMessage(e)}` } });
@@ -775,21 +934,79 @@ export function createOrbitStore(deps: StoreDeps = {}): StoreApi<OrbitState> {
           const info = await hostApi.handshake();
           if (!info || info.protocol !== HOST_PROTOCOL || !Array.isArray(info.verses) || !info.verses.length) throw new Error('its handshake is no longer usable');
           set({ host: { ...get().host!, info } });
+          keepShownOffered();
         } catch (e) {
           set({ host: { ...get().host!, error: `Could not refresh from ${can().name}: ${errorMessage(e)}` } });
           return;
         }
         const h = get().host!;
+        // the work verse (its tasks are live in the dock, Today, focus…), then the verse on screen if it is another
         try {
           const v = await hostApi.verse(h.verseId, h.rev || undefined);
           if (isUnchanged(v)) {
-            if (h.error) set({ host: { ...h, error: undefined } });
-            return;
-          }
-          applyVerse(v);
+            if (h.error) set({ host: { ...get().host!, error: undefined } });
+          } else applyVerse(v);
+        } catch (e) {
+          set({ host: { ...get().host!, error: `Could not refresh from ${can().name}: ${errorMessage(e)}` } });
+          return;
+        }
+        const sky = get().host!.sky;
+        if (!sky) return;
+        try {
+          const v = await hostApi.verse(sky.verseId, sky.rev || undefined);
+          // the person may have switched meanwhile
+          if (isUnchanged(v) || get().host?.sky?.verseId !== sky.verseId) return;
+          applySky(v);
         } catch (e) {
           set({ host: { ...get().host!, error: `Could not refresh from ${can().name}: ${errorMessage(e)}` } });
         }
+      },
+      showVerse: async (id, target, o = {}) => {
+        const h = get().host;
+        if (!hostApi || !h) return false;
+        if (!offeredVerses(h.info).some((v) => v.id === id)) {
+          get().toast({ text: `${can().name} does not offer that view now.` });
+          return false;
+        }
+        const seq = ++switchSeq;
+        if (id === h.verseId) {
+          if (h.sky) verseSwitch.emit();
+          showWork();
+          land(target, !!o.wormhole);
+          return true;
+        }
+        const cached = verseCache.get(id);
+        if (cached) {
+          if (h.shown !== id) verseSwitch.emit();
+          applySky(cached);
+          land(target, !!o.wormhole);
+          // then brought up to date: nothing changes on screen when the host says "unchanged"
+          void hostApi
+            .verse(id, cached.rev || undefined)
+            .then((v) => {
+              if (isUnchanged(v) || seq !== switchSeq || get().host?.shown !== id) return;
+              applySky(v);
+            })
+            .catch((e) => set({ host: { ...get().host!, error: `Could not refresh from ${can().name}: ${errorMessage(e)}` } }));
+          return true;
+        }
+        let v: Verse | Awaited<ReturnType<OrbitHost['verse']>>;
+        try {
+          v = await hostApi.verse(id);
+          if (isUnchanged(v)) throw new Error('it answered “unchanged” to a full request');
+        } catch (e) {
+          get().toast({ tone: 'danger', text: `Could not open ${verseName(id)} from ${can().name}: ${errorMessage(e, 'no answer')}`, timeout: 8000 });
+          return false;
+        }
+        if (seq !== switchSeq) return false; // another switch came after this one
+        verseSwitch.emit();
+        applySky(v as Verse);
+        land(target, !!o.wormhole);
+        return true;
+      },
+      followWormhole: async (a) => {
+        if (!a || typeof a.verse !== 'string') return false;
+        return get().showVerse(a.verse, { galaxy: a.galaxy, system: a.system, object: a.object }, { wormhole: true });
       },
       openInHost: (target) => {
         if (!hostApi || !target) return;
@@ -886,7 +1103,15 @@ export function createOrbitStore(deps: StoreDeps = {}): StoreApi<OrbitState> {
           .filter((t) => map.has(t.id))
           .map((t) => ({ ...workOf({ ...t, dependsOn: t.dependsOn.map((d) => map.get(d) ?? d) }, t0), id: map.get(t.id)! }));
         set({ taskWork: [...get().taskWork.filter((w) => !rows.some((r) => r.id === w.id)), ...rows] });
-        putMany('taskWork', rows);
+        // said plainly when it fails: the host has the tasks now, but what ORBIT keeps for them was not saved
+        writer.putMany('taskWork', rows).catch((e) => {
+          console.error('[orbit] working state for adopted tasks not saved', e);
+          get().toast({
+            tone: 'danger',
+            text: `${a.name} has the ${rows.length === 1 ? 'task' : `${rows.length} tasks`} now, but ORBIT could not save ${rows.length === 1 ? 'its' : 'their'} working state (parking, energy, estimates, subtasks, links) with ${a.name}. It is still on screen, and may be lost when ORBIT is next opened.`,
+            timeout: 12000,
+          });
+        });
         // 2. ORBIT's own copies go (first, so nothing below writes them again)…
         const gone = new Set(map.keys());
         const left = get().tasks.filter((t) => t.projectId === projectId && !t.host && !gone.has(t.id));
@@ -919,7 +1144,23 @@ export function createOrbitStore(deps: StoreDeps = {}): StoreApi<OrbitState> {
         if (!viewAvailable(can(), view)) return;
         set({ view });
       },
-      select: (selection) => set({ selection }),
+      select: (selection) => {
+        const h = get().host;
+        if (selection && h?.sky && !selectionShown(selection, h.sky) && selectionShown(selection, null)) {
+          // a task (from search, the dock, Today…) or another record of the work verse: the work verse comes back
+          // on screen and the camera goes to it
+          switchSeq++;
+          verseSwitch.emit();
+          showWork();
+          set({ selection });
+          const task = selection.type === 'task' ? get().tasks.find((t) => t.id === selection.id) : undefined;
+          if (task) get().requestFlight('system', task.projectId);
+          else if (selection.type === 'project') get().requestFlight('system', selection.id);
+          else if (selection.type === 'group') get().requestFlight('galaxy', selection.id);
+          return;
+        }
+        set({ selection });
+      },
       toast: (t) => {
         const id = uid();
         set({ toasts: [...get().toasts.slice(-3), { ...t, id }] });
@@ -965,7 +1206,10 @@ export function createOrbitStore(deps: StoreDeps = {}): StoreApi<OrbitState> {
         const ref = ownerOf('groups', id);
         // Where a host galaxy sits is ORBIT's to remember (a placement); anything else is the host's.
         if (ref && !onlyPosition(patch)) return refuse(refusal.kept(can()), ref.open);
-        patchRow('groups', id, patch);
+        // a galaxy has one place in every verse (placement g|<id>): the one on screen and the work verse's move together
+        const inSky = ref ? patchSky('groups', id, patch) : null;
+        const inWork = patchRow('groups', id, patch);
+        if (inSky && !inWork) put('groups', inSky);
       },
       deleteGroup: (id) => {
         const ref = ownerOf('groups', id);
@@ -1062,6 +1306,17 @@ export function createOrbitStore(deps: StoreDeps = {}): StoreApi<OrbitState> {
         return p;
       },
       updateProject: (id, patch) => {
+        const shownSys = get().host?.sky?.projects.find((p) => p.id === id);
+        if (shownSys?.host) {
+          // a system of another verse: dragged to a new place in its galaxy, and nothing else
+          if ('groupId' in patch && patch.groupId !== shownSys.groupId) return refuse(refusal.move(can()), shownSys.host.open);
+          const rest: Partial<Project> = { ...patch };
+          delete rest.groupId;
+          if (!onlyPosition(rest)) return refuse(refusal.kept(can()), shownSys.host.open);
+          const next = patchSky('projects', id, rest);
+          if (next) put('projects', next);
+          return;
+        }
         const cur = get().projects.find((p) => p.id === id);
         if (cur?.host) {
           // A host system may be dragged to a new place in its own galaxy; moving it to another galaxy, or
@@ -1099,7 +1354,12 @@ export function createOrbitStore(deps: StoreDeps = {}): StoreApi<OrbitState> {
         if (!get().host) return get().setPrefs({ deepSpace });
         // Hosted: deep space is placed like a host galaxy (and the preference is not the source of truth).
         const pl: Placement = { id: placementKey.galaxy(DEEP_SPACE), ...deepSpace, updatedAt: now() };
-        set({ prefs: { ...get().prefs, deepSpace }, placements: [...get().placements.filter((p) => p.id !== pl.id), pl] });
+        const h = get().host!;
+        set({
+          prefs: { ...get().prefs, deepSpace },
+          placements: [...get().placements.filter((p) => p.id !== pl.id), pl],
+          ...(h.sky?.deepSpace ? { host: { ...h, sky: { ...h.sky, deepSpace } } } : {}),
+        });
         put('placements', pl);
       },
       deleteProject: (id) => {
@@ -1628,12 +1888,7 @@ export function personalOnly(snap: Snapshot, hostTaskIds: Set<string>, hostIds: 
   };
 }
 
-/** The verse ORBIT opens first: the handshake's `start` when it is offered and not hidden, else the first shown. */
-export function startVerse(info: Handshake): string {
-  const shown = info.verses.filter((v) => v.shown !== false);
-  const offered = shown.length ? shown : info.verses;
-  return info.start && offered.some((v) => v.id === info.start) ? info.start : offered[0].id;
-}
+export { startVerse };
 
 /** Views that make sense with what the host provides (all of them when standalone). */
 export function viewAvailable(a: HostAbilities, v: ViewName): boolean {

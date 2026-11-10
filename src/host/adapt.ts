@@ -1,8 +1,9 @@
 /**
  * Turns a host's verse into ORBIT records: host galaxies become groups, host systems become projects and
  * host planets of type `task` become tasks. Each carries an in-memory `host` reference; ids are the host's.
- * Everything else a verse holds (attachments, collections, beacons, clusters, families) goes into a separate
- * slice keyed by id. Planets of type `item` are not handled in this stage and are skipped.
+ * Everything else a verse holds (attachments, collections, beacons, clusters, families, arrows) goes into a separate
+ * slice keyed by id. Planets of type `item` are records shown as planets: they become `ItemPlanet`s, kept by system
+ * in `extras.items`, and are never tasks (nothing that works on tasks ever sees them).
  *
  * Positions: a galaxy sits where the person put it (placement `g|<id>`), otherwise at the first free spiral
  * slot; a system sits where the person put it (placement `<verse>|<id>`, relative to its galaxy), otherwise at
@@ -10,7 +11,7 @@
  * refresh of the same verse and the sky does not jump.
  */
 import type { Group, HostRef, Placement, Priority, Project, Task } from '../types';
-import type { Attachment, Beacon, Caps, Cluster, Collection, Family, Galaxy, Planet, System, Verse } from './types';
+import type { Also, Arrow, Attachment, AttachmentState, Beacon, Caps, Cluster, Collection, Fact, Family, Galaxy, Open, Planet, System, Verse } from './types';
 import { findFreeSpot, nextGalaxySpot, SYSTEM_SPACING, type Pt } from '../data/layout';
 import { PROJECT_COLORS } from '../lib/colors';
 import { isValidDateKey } from '../lib/util';
@@ -30,16 +31,56 @@ export interface MoonSet {
   more: number;
 }
 
+/** Item planets are drawn this size (world units) when the host gives no `size`. */
+export const ITEM_DIAMETER = { min: 26, max: 60, default: 32 } as const;
+
+/**
+ * A record shown as a planet (a planet of type `item`). NOT a task: it lives in `extras.items`, by system, and never
+ * reaches anything that works on tasks (focus, parking, Today, Next, Insights, capture, search, counts).
+ */
+export interface ItemPlanet {
+  id: string;
+  system: string;
+  /** The verse it came from. */
+  verse: string;
+  title: string;
+  sub?: string;
+  kind: string;
+  family: string;
+  state: AttachmentState;
+  /** Its diameter in world units: from `size`, relative to the largest item of the verse (√, so area follows size). */
+  diameter: number;
+  /** The host's `size`, as sent. */
+  size?: number;
+  /** 0..1, or null for no ring. */
+  ring: number | null;
+  /** Shown outside its home galaxy: its only action is the way home. */
+  ghost: boolean;
+  note?: string;
+  notes?: string;
+  facts: Fact[];
+  /** What it uses or holds (its moons). */
+  moons: MoonSet;
+  open?: Open;
+  also: Also[];
+}
+
 /** What a verse holds besides galaxies, systems and tasks. */
 export interface HostExtras {
   families: Record<string, Family>;
-  /** By planet id. */
+  /** Moons of TASK planets, by planet id (an item keeps its own in `ItemPlanet.moons`). */
   attachments: Record<string, MoonSet>;
   /** By system id. */
   collections: Record<string, Collection>;
   beacons: Beacon[];
   clusters: Cluster[];
+  /** Item planets, by system id, in verse order. */
+  items: Record<string, ItemPlanet[]>;
+  /** Relations between planets of this verse whose two ends it has. */
+  arrows: Arrow[];
 }
+
+export const NO_EXTRAS: HostExtras = { families: {}, attachments: {}, collections: {}, beacons: [], clusters: [], items: {}, arrows: [] };
 
 export interface AdaptedVerse {
   verseId: string;
@@ -50,7 +91,7 @@ export interface AdaptedVerse {
   /** Where deep space sits, or null when no system lives there. */
   deepSpace: Pt | null;
   extras: HostExtras;
-  /** Planets left out (items, or pointing at a system the verse does not have). */
+  /** Planets left out (pointing at a system the verse does not have, or of no known type). */
   skipped: number;
 }
 
@@ -86,6 +127,7 @@ function galaxyRef(verse: string, g: Galaxy): HostRef {
     facts: g.facts,
     open: g.open,
     also: g.also,
+    actions: actionsOf(g.actions),
   };
 }
 
@@ -103,6 +145,47 @@ function systemRef(verse: string, s: System): HostRef {
     facts: s.facts,
     open: s.open,
     also: s.also,
+    portal: s.portal && typeof s.portal.verse === 'string' && s.portal.verse ? { verse: s.portal.verse, label: s.portal.label } : undefined,
+    actions: actionsOf(s.actions),
+  };
+}
+
+/** A host's actions, keeping only well-formed ones. */
+function actionsOf(a: unknown): HostRef['actions'] {
+  if (!Array.isArray(a)) return undefined;
+  const ok = a.filter((x): x is { id: string; label: string } => !!x && typeof x.id === 'string' && !!x.id && typeof x.label === 'string' && !!x.label.trim());
+  return ok.length ? ok.map((x) => ({ id: x.id, label: x.label.trim() })) : undefined;
+}
+
+const STATES: AttachmentState[] = ['live', 'archived', 'gone'];
+
+/** An item planet's diameter: √(size / largest), across the item range; no size → the default. */
+export function itemDiameter(size: number | undefined, largest: number): number {
+  if (typeof size !== 'number' || !Number.isFinite(size) || size < 0 || !(largest > 0)) return ITEM_DIAMETER.default;
+  return Math.round(ITEM_DIAMETER.min + (ITEM_DIAMETER.max - ITEM_DIAMETER.min) * Math.sqrt(Math.min(1, size / largest)));
+}
+
+export function planetToItem(verse: string, p: Planet, largest: number): ItemPlanet {
+  const ring = typeof p.ring === 'number' && Number.isFinite(p.ring) ? Math.max(0, Math.min(1, p.ring)) : null;
+  return {
+    id: p.id,
+    system: p.system,
+    verse,
+    title: p.title,
+    sub: p.sub,
+    kind: p.kind ?? '',
+    family: p.family ?? '',
+    state: STATES.includes(p.state as AttachmentState) ? (p.state as AttachmentState) : 'live',
+    diameter: itemDiameter(p.size, largest),
+    size: typeof p.size === 'number' ? p.size : undefined,
+    ring,
+    ghost: !!p.ghost,
+    note: p.note,
+    notes: p.notes,
+    facts: p.facts ?? [],
+    moons: { items: p.attachments ?? [], more: p.more ?? 0 },
+    open: p.open,
+    also: p.also ?? [],
   };
 }
 
@@ -143,6 +226,11 @@ export interface AdaptOptions {
   deepUsed?: boolean;
   /** Where ORBIT's own systems in deep space sit: the host's are auto-placed around them. */
   deepTaken?: Pt[];
+  /**
+   * Where galaxies already sit on screen (another verse's): a galaxy with no placement of its own takes the same
+   * place in every verse, so switching verse keeps it where it was.
+   */
+  centres?: Map<string, Pt>;
 }
 
 export function adaptVerse(v: Verse, placements: Placement[], opts: AdaptOptions = {}): AdaptedVerse {
@@ -166,6 +254,12 @@ export function adaptVerse(v: Verse, placements: Placement[], opts: AdaptOptions
   }
   const deepPlaced = deepUsed ? placed.get(placementKey.galaxy(DEEP_SPACE)) : undefined;
   if (deepPlaced) taken.push(round(deepPlaced));
+  for (const g of galaxies) {
+    const known = opts.centres?.get(g.id);
+    if (centres.has(g.id) || !known) continue;
+    centres.set(g.id, round(known));
+    taken.push(round(known));
+  }
   for (const g of galaxies) {
     if (centres.has(g.id)) continue;
     const spot = nextGalaxySpot(taken);
@@ -227,16 +321,26 @@ export function adaptVerse(v: Verse, placements: Placement[], opts: AdaptOptions
 
   const tasks: Task[] = [];
   const attachments: Record<string, MoonSet> = {};
+  const items: Record<string, ItemPlanet[]> = {};
+  const planets = v.planets ?? [];
+  const largest = Math.max(0, ...planets.filter((p) => p.type === 'item' && typeof p.size === 'number' && Number.isFinite(p.size)).map((p) => p.size!));
+  const planetIds = new Set<string>();
   let skipped = 0;
-  for (const p of v.planets ?? []) {
-    // Items are records shown as planets; they arrive in a later stage. Never count them as tasks.
-    if (p.type !== 'task' || !systemIds.has(p.system)) {
+  for (const p of planets) {
+    if (!systemIds.has(p.system) || (p.type !== 'task' && p.type !== 'item')) {
       skipped++;
+      continue;
+    }
+    planetIds.add(p.id);
+    if (p.type === 'item') {
+      // a record shown as a planet: kept apart from tasks, so nothing that works on tasks ever sees it
+      (items[p.system] ??= []).push(planetToItem(verse, p, largest));
       continue;
     }
     tasks.push(planetToTask(verse, p));
     if (p.attachments?.length || p.more) attachments[p.id] = { items: p.attachments ?? [], more: p.more ?? 0 };
   }
+  const arrows = (v.arrows ?? []).filter((a) => a && planetIds.has(a.from) && planetIds.has(a.to) && a.from !== a.to);
 
   const collections: Record<string, Collection> = {};
   for (const c of v.collections ?? []) if (systemIds.has(c.system)) collections[c.system] = c;
@@ -250,7 +354,7 @@ export function adaptVerse(v: Verse, placements: Placement[], opts: AdaptOptions
     projects,
     tasks,
     deepSpace,
-    extras: { families: v.families ?? {}, attachments, collections, beacons, clusters: v.clusters ?? [] },
+    extras: { families: v.families ?? {}, attachments, collections, beacons, clusters: v.clusters ?? [], items, arrows },
     skipped,
   };
 }

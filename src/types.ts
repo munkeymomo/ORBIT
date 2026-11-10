@@ -1,4 +1,4 @@
-import type { Also, Caps, Fact, Open } from './host/types';
+import type { Also, Caps, Fact, HostAction, Open } from './host/types';
 
 export type ID = string;
 
@@ -62,6 +62,10 @@ export interface HostRef {
   facts?: Fact[];
   open?: Open;
   also?: Also[];
+  /** A system that leads to another verse (drawn as a portal). */
+  portal?: { verse: string; label?: string };
+  /** What the host offers to do with this galaxy or system (in its panel). */
+  actions?: HostAction[];
 }
 
 /** A galaxy in the Universe. Its systems (projects) are positioned relative to (x, y). */
