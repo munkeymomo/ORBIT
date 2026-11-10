@@ -32,7 +32,8 @@ export interface MoonSet {
 }
 
 /** Item planets are drawn this size (world units) when the host gives no `size`. */
-export const ITEM_DIAMETER = { min: 26, max: 60, default: 32 } as const;
+/** `zero`: a planet whose `size` is 0 ("nothing yet") is smaller than any other, so it never reads as "a little". */
+export const ITEM_DIAMETER = { min: 26, max: 60, default: 32, zero: 20 } as const;
 
 /**
  * A record shown as a planet (a planet of type `item`). NOT a task: it lives in `extras.items`, by system, and never
@@ -159,8 +160,9 @@ function actionsOf(a: unknown): HostRef['actions'] {
 
 const STATES: AttachmentState[] = ['live', 'archived', 'gone'];
 
-/** An item planet's diameter: √(size / largest), across the item range; no size → the default. */
+/** An item planet's diameter: √(size / largest), across the item range; no size → the default; size 0 → the smallest of all. */
 export function itemDiameter(size: number | undefined, largest: number): number {
+  if (size === 0) return ITEM_DIAMETER.zero;
   if (typeof size !== 'number' || !Number.isFinite(size) || size < 0 || !(largest > 0)) return ITEM_DIAMETER.default;
   return Math.round(ITEM_DIAMETER.min + (ITEM_DIAMETER.max - ITEM_DIAMETER.min) * Math.sqrt(Math.min(1, size / largest)));
 }

@@ -1666,6 +1666,8 @@ function ItemNode({
   const it = iv.item;
   const live = it.state === 'live' && !it.ghost;
   const gone = it.state === 'gone';
+  // size 0, "nothing yet": the smallest diameter, a thin rim and a pale fill, so it never reads as "a little"
+  const empty = it.size === 0 && live;
   const hx = 50 + Math.cos(lightAngle) * 24;
   const hy = 50 + Math.sin(lightAngle) * 24;
   const r = d / 2 + 5;
@@ -1675,6 +1677,7 @@ function ItemNode({
     it.sub,
     familyLabel,
     it.ghost ? 'lives elsewhere' : it.state !== 'live' ? it.state : null,
+    it.size === 0 ? 'size 0, nothing yet' : null,
     it.ring != null ? `ring ${Math.round(it.ring * 100)}%` : null,
     it.moons.items.length + it.moons.more ? `${it.moons.items.length + it.moons.more} attached` : null,
   ]
@@ -1699,8 +1702,12 @@ function ItemNode({
             top: r + 2 - d / 2,
             width: d,
             height: d,
-            background: live ? `radial-gradient(circle at ${hx}% ${hy}%, rgba(255,255,255,.7) 0%, ${color} 36%, color-mix(in srgb, ${color} 42%, black) 100%)` : 'rgba(10,12,22,.85)',
-            border: live ? undefined : `${it.ghost ? 1.5 : 2.2}px ${it.ghost ? 'dashed' : 'solid'} ${color}`,
+            background: empty
+              ? `radial-gradient(circle at ${hx}% ${hy}%, rgba(255,255,255,.32) 0%, color-mix(in srgb, ${color} 34%, transparent) 55%, color-mix(in srgb, ${color} 16%, transparent) 100%)`
+              : live
+                ? `radial-gradient(circle at ${hx}% ${hy}%, rgba(255,255,255,.7) 0%, ${color} 36%, color-mix(in srgb, ${color} 42%, black) 100%)`
+                : 'rgba(10,12,22,.85)',
+            border: empty ? `1.2px solid color-mix(in srgb, ${color} 70%, transparent)` : live ? undefined : `${it.ghost ? 1.5 : 2.2}px ${it.ghost ? 'dashed' : 'solid'} ${color}`,
             boxShadow: selected ? '0 0 0 3px #0a0c12, 0 0 0 6px #a99bff, 0 0 26px 8px rgba(139,124,246,.7)' : undefined,
           }}
         >
@@ -2075,6 +2082,7 @@ function Legend({ onClose, hosted = false, hostName = '', verseLegend, recordsOn
       <Row icon={<span className="flex gap-1"><span className="h-4 w-4 rounded-full bg-[#5ad1c8]" /><span className="h-4 w-4 rounded-full border-2 border-[#5ad1c8]" /></span>}>
         {recordsOnly ? 'Planet: a record, coloured by its kind.' : 'Coloured by kind: a record, not a task.'} Hollow: archived; struck: gone; dashed and faint: lives elsewhere.
       </Row>
+      {recordsOnly && <Row icon={<span className="h-3.5 w-3.5 rounded-full border border-white/50 bg-white/15" />}>Smallest, thin and pale: size 0, nothing yet. Any size above 0 is a little larger and solid.</Row>}
       {recordsOnly && <Row icon={<span className="h-5 w-5 rounded-full border-2 border-white/10" style={{ borderTopColor: 'rgba(255,255,255,.85)', borderRightColor: 'rgba(255,255,255,.85)' }} />}>White ring: a share, as the line above says.</Row>}
       <Row icon={<span className="h-0.5 w-6 rounded bg-[#8fd8ff]" />}>Thin blue arrow: a relation between two records (e.g. “made from”), drawn from the first to the second. Never a block.</Row>
       <Row icon={<WormholeMark size={18} className="text-[#c9b3ff]" />}>Violet swirl: a portal or a wormhole to the same thing in another view.</Row>

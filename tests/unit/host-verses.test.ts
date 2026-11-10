@@ -178,7 +178,12 @@ describe('adapting items', () => {
 
   it('size maps by square root onto the planet range, relative to the largest; missing → default; no ring → null', () => {
     expect(itemDiameter(40, 40)).toBe(ITEM_DIAMETER.max);
-    expect(itemDiameter(0, 40)).toBe(ITEM_DIAMETER.min);
+    // size 0 ("nothing yet") is smaller than any size above 0, however small
+    expect(itemDiameter(0, 40)).toBe(ITEM_DIAMETER.zero);
+    expect(itemDiameter(0, 0)).toBe(ITEM_DIAMETER.zero);
+    expect(ITEM_DIAMETER.zero).toBeLessThan(ITEM_DIAMETER.min);
+    expect(itemDiameter(0.001, 40)).toBe(ITEM_DIAMETER.min);
+    expect(itemDiameter(1, 1000)).toBeGreaterThanOrEqual(ITEM_DIAMETER.min);
     expect(itemDiameter(10, 40)).toBe(Math.round(ITEM_DIAMETER.min + (ITEM_DIAMETER.max - ITEM_DIAMETER.min) * 0.5));
     expect(itemDiameter(undefined, 40)).toBe(ITEM_DIAMETER.default);
     const v: Verse = {

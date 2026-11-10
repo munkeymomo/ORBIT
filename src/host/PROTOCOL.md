@@ -220,7 +220,7 @@ so nothing that works on tasks can see them. What ORBIT does with each field:
 |---|---|
 | `title` | its name (beside the planet, laid out like task names); `sub` follows it close up and under the title in its panel |
 | `kind`, `family` | the colour is the family's (`families[family].color`); the panel shows the family's label (or `kind`) |
-| `size` | the planet's diameter: √(size ÷ the largest `size` in the verse) across 26–60 (world units); missing → 32 |
+| `size` | the planet's diameter: √(size ÷ the largest `size` in the verse) across 26–60 (world units); missing → 32. `0` ("nothing yet") is drawn smaller than any other (20), with a thin rim and a pale fill, so it never reads as "a little" |
 | `ring` | 0..1: a white ring around the planet showing that share; missing → no ring |
 | `state` | `live` filled; `archived` hollow; `gone` hollow and struck through; the panel shows a badge |
 | `ghost` | faint, dashed, with a small "elsewhere" mark; its panel shows only where it lives (its `also`) |
