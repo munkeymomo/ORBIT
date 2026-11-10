@@ -7,7 +7,7 @@ import type { Arrow } from '../../host/types';
 import { clamp } from '../../lib/util';
 import { LOD, type GalaxyPlace, type View } from './space';
 import { starNameRect, starRadius } from './skyLabels';
-import type { Measure, Rect } from './labels';
+import { ellipsize, type Measure, type Rect } from './labels';
 
 export interface ArrowCurve {
   from: string;
@@ -224,4 +224,115 @@ export function curveLabelPoint(c: ArrowCurve, stars?: Map<string, StarBox>, hal
       if (!hit) return p;
     }
   return at(0.5);
+}
+
+/* ---------------- the chip that says what an arrow means ---------------- */
+
+/** The chip's measures (px): its height, the widest it may be, and the least a planet's name may keep. */
+export const CHIP = { h: 22, maxW: 300, minTitle: 56, maxTitle: 130, padding: 20, gaps: 18, arrow: 10 } as const;
+
+/** What a planet is called in a chip: the text before " · " (the rest is its sub-line), cut at a word with an ellipsis. */
+export function chipTitle(title: string, maxW: number, measure: Measure): string {
+  const first = title.split(' · ')[0].trim() || title.trim();
+  return ellipsize(first, maxW, measure);
+}
+
+export interface ChipInput {
+  from: string;
+  to: string;
+  fromTitle: string;
+  toTitle: string;
+  label: string;
+  curve: ArrowCurve;
+}
+
+export interface PlacedChip {
+  from: string;
+  to: string;
+  label: string;
+  /** The names as drawn (shortened), and as they are (for the tooltip). */
+  fromText: string;
+  toText: string;
+  full: string;
+  /** Centre and size on screen. */
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  /** Planets whose names this chip sits on: they are hidden (they show on hover), never overlapped. */
+  hides: string[];
+}
+
+/**
+ * Places the chips of the arrows being looked at. Each chip's names are shortened to fit (`chipTitle`), then it sits on
+ * its curve, or just above or below it, at the first place that covers no planet, star, star name, other chip or
+ * corner control; failing that, where it hides the fewest planet names (never those of the arrow's own two planets).
+ * `labels` are the planet names as laid out: a name the chip sits on is returned in `hides`.
+ */
+export function placeArrowChips(
+  chips: ChipInput[],
+  o: {
+    measure: Measure;
+    /** Measure for the semibold label. */
+    measureBold?: Measure;
+    disks: Map<string, Spot>;
+    stars?: Map<string, StarBox>;
+    /** Planet names on screen, by planet id (only those shown count). */
+    labels?: Map<string, { shown: boolean; rect: Rect }>;
+    ui?: Rect[];
+    bounds?: Rect;
+  },
+): PlacedChip[] {
+  const bold = o.measureBold ?? ((t: string) => o.measure(t) * 1.04);
+  const placed: PlacedChip[] = [];
+  const rects: Rect[] = [];
+  const HARD = 1000;
+  const ts = [0.5, 0.44, 0.56, 0.38, 0.62, 0.32, 0.68, 0.26, 0.74, 0.2, 0.8];
+  const dys = [0, -16, 16, -30, 30];
+  for (const c of chips) {
+    const wl = Math.ceil(bold(c.label));
+    const room = CHIP.maxW - CHIP.padding - CHIP.gaps - CHIP.arrow - wl;
+    const each = clamp(Math.floor(room / 2), CHIP.minTitle, CHIP.maxTitle);
+    const fromText = chipTitle(c.fromTitle, each, o.measure);
+    const toText = chipTitle(c.toTitle, each, o.measure);
+    const w = Math.min(CHIP.maxW, Math.ceil(o.measure(fromText)) + wl + Math.ceil(o.measure(toText)) + CHIP.padding + CHIP.gaps + CHIP.arrow + 2);
+    const h = CHIP.h;
+    const cv = c.curve;
+    const at = (t: number) => {
+      const u = 1 - t;
+      return { x: u * u * cv.ax + 2 * u * t * cv.cx + t * t * cv.bx, y: u * u * cv.ay + 2 * u * t * cv.cy + t * t * cv.by };
+    };
+    let best: { x: number; y: number; score: number; hides: string[] } | null = null;
+    let n = 0;
+    for (const t of ts)
+      for (const dy of dys) {
+        const p = at(t);
+        const r: Rect = { x: p.x - w / 2, y: p.y + dy - h / 2, w, h };
+        let score = n++ * 0.01;
+        if (o.bounds && !inRect(r, o.bounds)) score += HARD;
+        for (const d of o.disks.values()) if (overlapsCircle(r, d.x, d.y, d.r + 2)) score += HARD;
+        for (const st of o.stars?.values() ?? []) if (overlapsCircle(r, st.x, st.y, st.r) || overlapsRect(r, st.name, 2)) score += HARD;
+        if (rects.some((q) => overlapsRect(r, q, 3)) || (o.ui ?? []).some((q) => overlapsRect(r, q, 0))) score += HARD;
+        const hides: string[] = [];
+        for (const [id, l] of o.labels ?? []) {
+          if (!l.shown || id === c.from || id === c.to) continue;
+          if (overlapsRect(r, l.rect, 1)) hides.push(id);
+        }
+        // a name under the chip is lost for the moment: better any free place than that, and fewer is better than more
+        score += hides.length * 2;
+        if (!best || score < best.score) best = { x: p.x, y: p.y + dy, score, hides };
+      }
+    const spot = best!;
+    rects.push({ x: spot.x - w / 2, y: spot.y - h / 2, w, h });
+    placed.push({ from: c.from, to: c.to, label: c.label, fromText, toText, full: `${c.fromTitle}  ${c.label}  →  ${c.toTitle}`, x: spot.x, y: spot.y, w, h, hides: spot.hides });
+  }
+  return placed;
+}
+
+const inRect = (a: Rect, b: Rect) => a.x >= b.x && a.y >= b.y && a.x + a.w <= b.x + b.w && a.y + a.h <= b.y + b.h;
+const overlapsRect = (a: Rect, b: Rect, pad: number) => a.x < b.x + b.w + pad && b.x < a.x + a.w + pad && a.y < b.y + b.h + pad && b.y < a.y + a.h + pad;
+function overlapsCircle(r: Rect, cx: number, cy: number, rad: number): boolean {
+  const nx = clamp(cx, r.x, r.x + r.w);
+  const ny = clamp(cy, r.y, r.y + r.h);
+  return Math.hypot(nx - cx, ny - cy) < rad;
 }

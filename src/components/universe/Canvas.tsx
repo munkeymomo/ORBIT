@@ -15,7 +15,7 @@ import { ChangedBadge, ChangedPill, ChangedRim, NotEqual } from './ChangedMark';
 import { changedText } from '../../host/changed';
 import type { Also, Arrow, Beacon, Family } from '../../host/types';
 import { verseSwitch } from '../../host/verses';
-import { arrowCurves, curveLabelPoint, planetSpots, starBoxes } from './arrows';
+import { arrowCurves, placeArrowChips, planetSpots, starBoxes, type PlacedChip } from './arrows';
 import { VerseBar } from './VerseBar';
 import { useOfferedVerses, WormholeMark, wormholeText } from '../host/Wormholes';
 import { galaxyLabelHeight, placeGalaxyLabels } from './galaxyLabels';
@@ -67,6 +67,7 @@ const measureDate = measureWith('600 11px Inter Variable, system-ui, sans-serif'
 
 const VIEW_KEY = 'orbit-space-view';
 const NO_ARROWS: Arrow[] = [];
+const NO_CHIPS: PlacedChip[] = [];
 const measureGalaxyName = (name: string) => measureWith('600 15px Space Grotesk Variable, system-ui, sans-serif', 9.6)(name.toUpperCase()) + name.length * 2.1;
 /** The counts under a galaxy's name (TASK counts; items as "n items"). */
 function galaxyCountText(g: GalaxyPlace): string {
@@ -732,6 +733,27 @@ export function UniverseCanvas({ onNewSystem, onNewGalaxy }: { onNewSystem: (gal
     return m;
   }, [galaxies]);
   const arrowFocus = useMemo(() => new Set([selectedPlanet, hovered].filter((x): x is string => !!x)), [selectedPlanet, hovered]);
+  // the chips of the arrows being looked at: shortened names, placed clear of planets, stars and each other; a planet
+  // name a chip has to sit on is hidden (it shows on hover)
+  const chips = useMemo(() => {
+    if (!view || !arrowList.length || !size.w) return NO_CHIPS;
+    const inputs = curves
+      .filter((c) => c.label && (arrowFocus.has(c.from) || arrowFocus.has(c.to)))
+      .map((c) => ({ from: c.from, to: c.to, label: c.label!, fromTitle: planetTitles.get(c.from) ?? '', toTitle: planetTitles.get(c.to) ?? '', curve: c }));
+    if (!inputs.length) return NO_CHIPS;
+    const disks = planetSpots(galaxies, view, level === 'universe', size);
+    return placeArrowChips(inputs, { measure: measureLabel, measureBold: measureDate, disks, stars: arrowStars, labels: skyWords.planets, ui, bounds: { x: 4, y: size.top ?? 76, w: size.w - 8, h: size.h - (size.top ?? 76) - 4 } });
+  }, [view, arrowList, size, curves, arrowFocus, planetTitles, galaxies, level, arrowStars, skyWords, ui]);
+  const words = useMemo(() => {
+    const hidden = new Set(chips.flatMap((c) => c.hides));
+    if (!hidden.size) return skyWords;
+    const planets = new Map(skyWords.planets);
+    for (const id of hidden) {
+      const l = planets.get(id);
+      if (l) planets.set(id, { ...l, shown: false });
+    }
+    return { ...skyWords, planets };
+  }, [skyWords, chips]);
   // the whole universe: galaxies' names and counts never cover each other
   const galaxyLabels = useMemo(
     () =>
@@ -780,8 +802,8 @@ export function UniverseCanvas({ onNewSystem, onNewGalaxy }: { onNewSystem: (gal
             families={families}
             clusters={clusters}
             layers={layers}
-            planetLabels={skyWords.planets}
-            crowded={skyWords.crowded}
+            planetLabels={words.planets}
+            crowded={words.crowded}
             arrows={curves}
             arrowFocus={arrowFocus}
             galaxyBoxes={galaxyLabels ?? undefined}
@@ -795,24 +817,20 @@ export function UniverseCanvas({ onNewSystem, onNewGalaxy }: { onNewSystem: (gal
 
         {/* what a relation says, on a backing above stars, names and planets; only for the selected or hovered planet's arrows */}
         {view &&
-          nudgeApart(
-            curves.filter((c) => c.label && (arrowFocus.has(c.from) || arrowFocus.has(c.to))).map((c) => ({ c, ...curveLabelPoint(c, arrowStars, Math.min(300, measureLabel(`${planetTitles.get(c.from) ?? ''}  ${c.label}  →  ${planetTitles.get(c.to) ?? ''}`) + 24) / 2) })),
-            24,
-          ).map(({ c, ...m }) => {
-              return (
-                <div
-                  key={`al-${c.from}-${c.to}`}
-                  data-arrow-label={`${c.from}>${c.to}`}
-                  className="pointer-events-none absolute z-[45] flex max-w-[300px] -translate-x-1/2 -translate-y-1/2 items-center gap-1.5 rounded-full border border-[#8fd8ff]/60 bg-[#060914]/95 px-2.5 py-0.5 text-[11.5px] whitespace-nowrap shadow-panel"
-                  style={{ left: m.x, top: m.y }}
-                >
-                  <span className="min-w-0 truncate text-muted">{planetTitles.get(c.from) ?? ''}</span>
-                  <span className="font-semibold text-[#d6f1ff]">{c.label}</span>
-                  <span aria-hidden className="text-[#8fd8ff]">→</span>
-                  <span className="min-w-0 truncate text-muted">{planetTitles.get(c.to) ?? ''}</span>
-                </div>
-              );
-            })}
+          chips.map((c) => (
+            <div
+              key={`al-${c.from}-${c.to}`}
+              data-arrow-label={`${c.from}>${c.to}`}
+              title={c.full}
+              className="pointer-events-none absolute z-[45] flex -translate-x-1/2 -translate-y-1/2 items-center gap-1.5 overflow-hidden rounded-full border border-[#8fd8ff]/60 bg-[#060914]/95 px-2.5 text-[11.5px] whitespace-nowrap shadow-panel"
+              style={{ left: c.x, top: c.y, width: c.w, height: c.h }}
+            >
+              <span className="text-muted">{c.fromText}</span>
+              <span className="font-semibold text-[#d6f1ff]">{c.label}</span>
+              <span aria-hidden className="text-[#8fd8ff]">→</span>
+              <span className="text-muted">{c.toText}</span>
+            </div>
+          ))}
 
         {view &&
           galaxies.map((g) => {
@@ -977,7 +995,7 @@ export function UniverseCanvas({ onNewSystem, onNewGalaxy }: { onNewSystem: (gal
                     d={clamp(sl.d * k, 14, 64)}
                     lightAngle={Math.atan2(-sl.y, -sl.x)}
                     today={today}
-                    label={skyWords.planets.get(tv.task.id)}
+                    label={words.planets.get(tv.task.id)}
                     selected={selection?.type === 'task' && selection.id === tv.task.id}
                     away={!!ctx.system && ctx.system.pv.project.id !== s.pv.project.id}
                     dimmed={dim && (!s.pv.matches || ((!!query || !!filter.uses || filter.hasChanged) && !tv.matches))}
@@ -1000,7 +1018,7 @@ export function UniverseCanvas({ onNewSystem, onNewGalaxy }: { onNewSystem: (gal
                     y={sy + sl.y * k}
                     d={clamp(sl.d * k, 14, 64)}
                     lightAngle={Math.atan2(-sl.y, -sl.x)}
-                    label={skyWords.planets.get(iv.item.id)}
+                    label={words.planets.get(iv.item.id)}
                     selected={selection?.type === 'item' && selection.id === iv.item.id}
                     away={!!ctx.system && ctx.system.pv.project.id !== s.pv.project.id}
                     dimmed={dim && (!s.pv.matches || ((!!query || filter.hasChanged) && !iv.matches))}
@@ -1022,7 +1040,7 @@ export function UniverseCanvas({ onNewSystem, onNewGalaxy }: { onNewSystem: (gal
                 // outward from the star, clear of the planet's name, and inside the view
                 // beside the planet, clear of its name; on the side away from the detail panel (on the right) when
                 // there is room, inside the canvas, and never wider than a short list needs
-                const lab = skyWords.planets.get(selId);
+                const lab = words.planets.get(selId);
                 const off = Math.max(d / 2 + 18, lab?.shown && (lab.side === 'left' || lab.side === 'right') ? d / 2 + 14 + lab.rect.w : 0, 40);
                 // the list goes outside the system (past its outer orbit or belt) where it fits, with a line to its
                 // planet; only when nowhere outside fits does it sit beside the planet (away from the panel)
@@ -1033,7 +1051,7 @@ export function UniverseCanvas({ onNewSystem, onNewGalaxy }: { onNewSystem: (gal
                 // never over another planet's name
                 // (its own name included: the list never covers the selected planet's label either)
                 const names = [...s.pv.tasks.map((tv) => tv.task.id), ...s.pv.items.map((iv) => iv.item.id)]
-                  .map((pid) => skyWords.planets.get(pid))
+                  .map((pid) => words.planets.get(pid))
                   .filter((l): l is OrbitLabel => !!l?.shown)
                   .map((l) => l.rect);
                 const out = outsideSystem({ sx, sy, py, outer, canvasW: size.w, canvasH: size.h, top: size.top ?? 76, w: 230, h, avoid: [...ui, ...names] });
@@ -1107,7 +1125,7 @@ export function UniverseCanvas({ onNewSystem, onNewGalaxy }: { onNewSystem: (gal
               if (!onScreen(bx, by, 10)) return [];
               // dates too close together to label one by one: "n dates" opens the panel that lists them
               const count =
-                first && skyWords.crowded.has(owner) ? (
+                first && words.crowded.has(owner) ? (
                   <button
                     key={`bc-${owner}`}
                     aria-label={`${n} dates. Open the list.`}
@@ -1228,17 +1246,6 @@ export function UniverseCanvas({ onNewSystem, onNewGalaxy }: { onNewSystem: (gal
 }
 
 /* ================= pieces ================= */
-
-/** Chips at (x, y) that would sit on top of each other are moved down, one under the next. */
-function nudgeApart<T extends { x: number; y: number }>(chips: T[], h: number, w = 300): T[] {
-  const placed: T[] = [];
-  for (const c of [...chips].sort((a, b) => a.y - b.y)) {
-    let y = c.y;
-    while (placed.some((p) => Math.abs(p.y - y) < h && Math.abs(p.x - c.x) < w)) y += h;
-    placed.push({ ...c, y });
-  }
-  return placed;
-}
 
 function Breadcrumbs({ ctx, galaxies, onFly, onUp, compact = false }: { ctx: { galaxy: GalaxyPlace | null; system: SystemPlace | null }; galaxies: GalaxyPlace[]; onFly: (t: Target) => void; onUp: () => void; compact?: boolean }) {
   const crumb = cx('inline-flex h-8 min-w-0 items-center gap-1.5 rounded-lg px-2.5 text-[13px] font-medium transition-colors hover:bg-surface-3', compact ? 'max-w-[150px]' : 'max-w-[200px]');
