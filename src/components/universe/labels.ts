@@ -78,6 +78,27 @@ export function wrapLabel(text: string, maxW: number, measure: Measure, maxLines
   return lines;
 }
 
+/**
+ * Wraps `text` into at most `maxLines` lines. When it does not fit, the MIDDLE is cut ("Head… tail"), keeping the
+ * start and the end, so names that differ only at the end stay different.
+ */
+export function wrapMiddle(text: string, maxW: number, measure: Measure, maxLines = 3): string[] {
+  const clean = text.trim().replace(/\s+/g, ' ');
+  const fits = (t: string) => wrapLabel(t, maxW, measure, maxLines + 1).length <= maxLines;
+  if (fits(clean)) return wrapLabel(clean, maxW, measure, maxLines);
+  for (let keep = clean.length - 1; keep >= 6; keep--) {
+    const tailN = Math.ceil(keep * 0.4);
+    let tail = clean.slice(clean.length - tailN);
+    // start the tail at a word, not in the middle of one
+    const sp = tail.indexOf(' ');
+    if (sp > 0 && sp < tail.length - 3 && clean[clean.length - tailN - 1] !== ' ') tail = tail.slice(sp + 1);
+    const head = clean.slice(0, keep - tailN).trimEnd();
+    const cand = `${head}… ${tail}`;
+    if (fits(cand)) return wrapLabel(cand, maxW, measure, maxLines);
+  }
+  return wrapLabel(clean, maxW, measure, maxLines);
+}
+
 export interface OrbitLabelInput {
   id: string;
   /** The planet's centre and radius (screen px). */

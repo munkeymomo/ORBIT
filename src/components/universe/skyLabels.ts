@@ -4,7 +4,7 @@
  * together to label one by one, and the boxes nothing may cover (a system's own name, its star, its dates).
  */
 import { clamp } from '../../lib/util';
-import { circleRect, collapseWhenCrowded, placeOrbitLabels, wrapLabel, type Measure, type OrbitLabel, type Rect } from './labels';
+import { circleRect, collapseWhenCrowded, placeOrbitLabels, wrapMiddle, type Measure, type OrbitLabel, type Rect } from './labels';
 import { galaxyBeaconSpot, LOD, systemBeaconSpot, type GalaxyPlace, type Size, type SystemPlace, type View } from './space';
 import type { Beacon } from '../../host/types';
 import { daysBetween } from '../../lib/util';
@@ -28,11 +28,17 @@ export function beaconText(b: Beacon, today: string, full: boolean): string {
 /** The star's size on screen, as StarNode draws it. */
 export const starRadius = (s: SystemPlace, k: number) => clamp(s.pv.radius * k, 9, 66);
 
-/** The box under a star that holds its name (up to two lines) and its one-line summary. */
+/** A system's name as it is drawn: up to three lines, the middle cut ("Head… tail") when it still does not fit. */
+export function starNameLines(name: string, rs: number, measure: Measure): string[] {
+  const scale = (rs >= 30 ? 15 : 13) / 11.5;
+  return wrapMiddle(name, STAR_NAME_W, (t) => measure(t) * scale * 1.06, 3);
+}
+
+/** The box under a star that holds its name (up to three lines) and its one-line summary. */
 export function starNameRect(s: SystemPlace, sx: number, sy: number, k: number, measure: Measure): Rect {
   const rs = starRadius(s, k);
   const scale = (rs >= 30 ? 15 : 13) / 11.5;
-  const lines = wrapLabel(s.pv.project.name, STAR_NAME_W, (t) => measure(t) * scale * 1.06, 2);
+  const lines = starNameLines(s.pv.project.name, rs, measure);
   const meta = `${s.pv.project.host?.code ? `${s.pv.project.host.code} · ` : ''}${starSummary(s.pv)}`;
   const w = Math.min(STAR_NAME_W, Math.max(measure(meta), ...lines.map((l) => measure(l) * scale * 1.06)) + 20);
   const h = lines.length * (rs >= 30 ? 19 : 17) + 21;

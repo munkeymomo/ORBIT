@@ -41,7 +41,7 @@ import {
 } from './space';
 import { SpacePainter } from './SpacePainter';
 import { moonListPlacement, outsideSystem, type Measure, type OrbitLabel } from './labels';
-import { layoutSky, STAR_NAME_W } from './skyLabels';
+import { layoutSky, STAR_NAME_W, starNameLines } from './skyLabels';
 import { requestPanelSection } from '../task/panelSection';
 
 /** Text widths for label layout, measured with the same font the labels use (an estimate without a canvas). */
@@ -1199,7 +1199,7 @@ function Breadcrumbs({ ctx, galaxies, onFly, onUp, compact = false }: { ctx: { g
       {ctx.galaxy ? (
         <>
           <ChevronRight size={14} className="shrink-0 text-faint" />
-          <button className={cx(crumb, !ctx.system ? 'text-text' : 'text-muted')} onClick={() => onFly({ kind: 'galaxy', id: ctx.galaxy!.id })} aria-current={!ctx.system ? 'location' : undefined}>
+          <button className={cx(crumb, !ctx.system ? 'text-text' : 'text-muted')} onClick={() => onFly({ kind: 'galaxy', id: ctx.galaxy!.id })} aria-current={!ctx.system ? 'location' : undefined} title={ctx.galaxy.name}>
             <span className="h-2.5 w-2.5 shrink-0 rounded-full" style={{ background: ctx.galaxy.hex }} />
             <span className="truncate">{ctx.galaxy.name}</span>
           </button>
@@ -1207,7 +1207,7 @@ function Breadcrumbs({ ctx, galaxies, onFly, onUp, compact = false }: { ctx: { g
           {ctx.system ? (
             <>
               <ChevronRight size={14} className="shrink-0 text-faint" />
-              <span className={cx(crumb, 'text-text hover:bg-transparent')} aria-current="location">
+              <span className={cx(crumb, 'text-text hover:bg-transparent')} aria-current="location" title={ctx.system.pv.project.name}>
                 <span className="h-2.5 w-2.5 shrink-0 rounded-full" style={{ background: colorHex(ctx.system.pv.project.color) }} />
                 <span className="truncate">{ctx.system.pv.project.name}</span>
               </span>
@@ -1230,6 +1230,7 @@ function Breadcrumbs({ ctx, galaxies, onFly, onUp, compact = false }: { ctx: { g
               }
               items={ctx.galaxy.systems.map((s) => ({
                 label: s.pv.project.name,
+                title: s.pv.project.name,
                 icon: <span className="h-2.5 w-2.5 rounded-full" style={{ background: colorHex(s.pv.project.color) }} />,
                 onSelect: () => onFly({ kind: 'system', id: s.pv.project.id }),
               }))}
@@ -1442,12 +1443,18 @@ function StarNode({
         )}
       </button>
     </div>
-    {/* its name: above the planets (nothing is drawn over it), two lines at most, ending in an ellipsis at a word */}
+    {/* its name: above the planets (nothing is drawn over it), three lines at most; a name too long for that loses its middle, not its end */}
     <div
       className={cx('pointer-events-none absolute -translate-x-1/2 text-center', close && 'rounded-lg bg-[#05070f]/70 px-2 py-0.5 backdrop-blur-[2px]')}
       style={{ left: x, top: y + ring + 8, width: close ? 'max-content' : STAR_NAME_W, maxWidth: STAR_NAME_W, opacity: dimmed ? 0.3 : faded ? 0.35 : 1, zIndex: dragging ? 30 : 24 }}
     >
-      <div className={cx('line-clamp-2 font-display leading-tight font-semibold break-words [text-shadow:0_0_3px_#000,0_1px_10px_rgba(0,0,0,.95)]', rs >= 30 ? 'text-[15px]' : 'text-[13px]', current ? 'text-white' : 'text-text')}>{project.name}</div>
+      <div title={project.name} className={cx('font-display leading-tight font-semibold [text-shadow:0_0_3px_#000,0_1px_10px_rgba(0,0,0,.95)]', rs >= 30 ? 'text-[15px]' : 'text-[13px]', current ? 'text-white' : 'text-text')}>
+        {starNameLines(project.name, rs, measureLabel).map((l, i) => (
+          <span key={i} className="block whitespace-nowrap">
+            {l}
+          </span>
+        ))}
+      </div>
       {showMeta && (
         <div className="tabular truncate text-[11.5px] text-muted [text-shadow:0_0_3px_#000,0_1px_8px_rgba(0,0,0,.95)]">
           {project.host?.code ? `${project.host.code} · ` : ''}

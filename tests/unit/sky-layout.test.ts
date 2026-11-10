@@ -10,9 +10,10 @@ import {
   placeOrbitLabels,
   sidesFor,
   wrapLabel,
+  wrapMiddle,
   type Rect,
 } from '../../src/components/universe/labels';
-import { beaconText, layoutSky, starNameRect } from '../../src/components/universe/skyLabels';
+import { beaconText, layoutSky, starNameLines, starNameRect } from '../../src/components/universe/skyLabels';
 import { clusterOutlinePoints, convexHull, universeLabelBox } from '../../src/components/universe/SpacePainter';
 import { adaptVerse } from '../../src/host/adapt';
 import { abilities } from '../../src/host/caps';
@@ -236,5 +237,33 @@ describe('the selected planet\'s own words', () => {
     const moved = outsideSystem({ ...base, avoid: [name] });
     expect(moved === null || !overlaps(moved.box, name, 4)).toBe(true);
     expect(moved?.box).not.toEqual(free.box);
+  });
+});
+
+describe('system names (wrapMiddle)', () => {
+  const m = (t: string) => t.length * 7;
+  const base = 'BIG-000 · Template batch A master family · series Loading ramp · Hydrothermal route with a long description';
+  it('wraps to three lines before it cuts anything', () => {
+    const lines = wrapMiddle('RUN-000 · Starter dough master family · series Proving ramp · Overnight batch 1', 220, m, 3);
+    expect(lines).toHaveLength(3);
+    expect(lines.join(' ')).not.toContain('…');
+  });
+  it('names that differ only at the end stay different: the middle is cut, the tail kept', () => {
+    const names = ['batch 1', 'batch 2', 'batch 3'].map((t) => `${base} · ${t}`);
+    const out = names.map((n) => wrapMiddle(n, 220, m, 3));
+    for (const [i, lines] of out.entries()) {
+      expect(lines.length).toBeLessThanOrEqual(3);
+      expect(lines.every((l) => m(l) <= 220)).toBe(true);
+      const text = lines.join(' ');
+      expect(text).toContain('…');
+      expect(text.startsWith('BIG-000')).toBe(true);
+      expect(text.endsWith(`batch ${i + 1}`)).toBe(true);
+    }
+    expect(new Set(out.map((l) => l.join(' '))).size).toBe(3);
+  });
+  it('a short name is untouched, and starNameLines uses the same rule at the star\'s size', () => {
+    expect(wrapMiddle('Garden tools', 220, m, 3)).toEqual(['Garden tools']);
+    expect(starNameLines('Garden tools', 20, m)).toEqual(['Garden tools']);
+    expect(starNameLines(`${base} · batch 9`, 40, m).length).toBeLessThanOrEqual(3);
   });
 });

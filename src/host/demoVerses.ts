@@ -162,6 +162,17 @@ function thingsVerse(): Verse {
   put(item('i-salt', 'th-bk-pantry', 'Sea salt', 'material', { size: 8, ring: 0.7 }));
   put(item('i-starter', 'th-bk-pantry', 'Sourdough starter', 'material', { size: 14, ring: 1, sub: 'Fed daily' }));
 
+  // Three long-named systems that differ only at the end, holding 14, 2 and 6 items (names, star sizes, size 0 and 1)
+  const long = 'RUN-000 · Starter dough master family · series Proving ramp · Rye and wholemeal variant, long cold rise';
+  [
+    ['th-bk-run1', 'Overnight batch 1', 14],
+    ['th-bk-run2', 'Overnight batch 2', 2],
+    ['th-bk-run3', 'Overnight batch 3', 6],
+  ].forEach(([id, tail, n], r) => {
+    sys(id as string, 'g-bakery', `${long} · ${tail}`, 'material', { color: 'coral' });
+    for (let i = 0; i < (n as number); i++) put(item(`${id}-${i + 1}`, id as string, `Loaf ${r + 1}.${i + 1}`, 'material', { size: i === 0 ? 0 : i === 1 ? 1 : 2 + ((i * 5 + r) % 9), ring: ((i * 29) % 100) / 100 }));
+  });
+
   // Market stall
   sys('th-mk-kit', 'g-market', 'Stall kit', 'tool', { color: 'violet' });
   put(item('i-gazebo', 'th-mk-kit', 'Gazebo', 'tool', { size: 4, ring: 0.5, note: 'One side panel torn.', attachments: [paper('d-gazebo-photo', 'photo', 'Torn panel')] }));

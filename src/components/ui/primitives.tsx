@@ -304,6 +304,8 @@ export function Modal({
 
 export interface MenuItem {
   label: string;
+  /** The full words, when the label may be cut to fit. */
+  title?: string;
   icon?: ReactNode;
   onSelect: () => void;
   danger?: boolean;
@@ -344,7 +346,7 @@ export function Menu({ trigger, items, align = 'right', label }: { trigger: (p: 
           role="menu"
           aria-label={label}
           onKeyDown={onMenuKey}
-          className={cx('anim-pop absolute top-full z-40 mt-1.5 min-w-[200px] rounded-xl border border-line-strong bg-raised p-1 shadow-panel', align === 'right' ? 'right-0' : 'left-0')}
+          className={cx('anim-pop absolute top-full z-40 mt-1.5 max-w-[min(360px,90vw)] min-w-[200px] rounded-xl border border-line-strong bg-raised p-1 shadow-panel', align === 'right' ? 'right-0' : 'left-0')}
         >
           {items.map((it, i) =>
             it === 'sep' ? (
@@ -355,6 +357,7 @@ export function Menu({ trigger, items, align = 'right', label }: { trigger: (p: 
                 role="menuitem"
                 type="button"
                 disabled={it.disabled}
+                title={it.title}
                 onClick={() => {
                   setOpen(false);
                   it.onSelect();
@@ -364,8 +367,8 @@ export function Menu({ trigger, items, align = 'right', label }: { trigger: (p: 
                   it.danger ? 'text-danger hover:bg-danger-soft' : 'text-text hover:bg-surface-3',
                 )}
               >
-                <span className="flex w-4 justify-center text-muted">{it.icon}</span>
-                {it.label}
+                <span className="flex w-4 shrink-0 justify-center text-muted">{it.icon}</span>
+                <span className="min-w-0 flex-1 truncate">{it.label}</span>
               </button>
             ),
           )}
