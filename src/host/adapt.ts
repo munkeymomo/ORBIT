@@ -33,7 +33,7 @@ export interface MoonSet {
 
 /** Item planets are drawn this size (world units) when the host gives no `size`. */
 /** `zero`: a planet whose `size` is 0 ("nothing yet") is smaller than any other, so it never reads as "a little". */
-export const ITEM_DIAMETER = { min: 26, max: 60, default: 32, zero: 20 } as const;
+export const ITEM_DIAMETER = { min: 26, max: 60, default: 32, zero: 20, step: 5 } as const;
 
 /**
  * A record shown as a planet (a planet of type `item`). NOT a task: it lives in `extras.items`, by system, and never
@@ -165,6 +165,32 @@ export function itemDiameter(size: number | undefined, largest: number): number 
   if (size === 0) return ITEM_DIAMETER.zero;
   if (typeof size !== 'number' || !Number.isFinite(size) || size < 0 || !(largest > 0)) return ITEM_DIAMETER.default;
   return Math.round(ITEM_DIAMETER.min + (ITEM_DIAMETER.max - ITEM_DIAMETER.min) * Math.sqrt(Math.min(1, size / largest)));
+}
+
+/**
+ * The diameters of the item planets of ONE system, from their sizes. Each size gets the verse-wide √ mapping
+ * (`itemDiameter`), which keeps one system's planets comparable with another's; but when the verse's largest is far
+ * bigger than the sizes in this system (sizes 1, 2, 3 beside a 300), that mapping squeezes them into one or two world
+ * units. So distinct positive sizes in a system are then spread: each is at least `ITEM_DIAMETER.step` (5) world units
+ * larger than the next smaller one (or, with more than seven distinct sizes, as many whole units as the 34 of the
+ * range allow: floor(34 / (n - 1)), never less than 1 up to 35 distinct sizes), order kept, never outside 26–60.
+ * A system whose sizes were already well apart is unchanged. Size 0 stays the smallest of all ("nothing yet"); an item
+ * with no size keeps the default. Returns one diameter per input, in order.
+ */
+export function itemDiameters(sizes: (number | undefined)[], largest: number): number[] {
+  const base = sizes.map((z) => itemDiameter(z, largest));
+  const valid = (z: number | undefined): z is number => typeof z === 'number' && Number.isFinite(z) && z > 0 && largest > 0;
+  const distinct = [...new Set(sizes.filter(valid))].sort((a, b) => a - b);
+  const n = distinct.length;
+  if (n < 2) return base;
+  const { min, max, step } = ITEM_DIAMETER;
+  const gap = Math.max(1, Math.min(step, Math.floor((max - min) / (n - 1))));
+  const f = distinct.map((z) => itemDiameter(z, largest));
+  for (let i = 1; i < n; i++) f[i] = Math.max(f[i], f[i - 1] + gap);
+  f[n - 1] = Math.min(f[n - 1], max);
+  for (let i = n - 2; i >= 0; i--) f[i] = Math.min(f[i], f[i + 1] - gap);
+  const by = new Map(distinct.map((z, i) => [z, f[i]]));
+  return sizes.map((z, i) => (valid(z) ? by.get(z)! : base[i]));
 }
 
 export function planetToItem(verse: string, p: Planet, largest: number): ItemPlanet {
@@ -344,6 +370,11 @@ export function adaptVerse(v: Verse, placements: Placement[], opts: AdaptOptions
     }
     tasks.push(planetToTask(verse, p));
     if (p.attachments?.length || p.more) attachments[p.id] = { items: p.attachments ?? [], more: p.more ?? 0 };
+  }
+  // item sizes are spread within each system, so small whole numbers beside a large verse-wide maximum stay apart
+  for (const list of Object.values(items)) {
+    const d = itemDiameters(list.map((it) => it.size), largest);
+    list.forEach((it, i) => (it.diameter = d[i]));
   }
   const arrows = (v.arrows ?? []).filter((a) => a && planetIds.has(a.from) && planetIds.has(a.to) && a.from !== a.to);
 
