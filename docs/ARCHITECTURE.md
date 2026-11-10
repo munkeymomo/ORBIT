@@ -35,9 +35,12 @@ Zustand store  ── pure domain logic in src/lib (timer, scoring, backup, date
         │  write-through after every action
         ▼
 StorageAdapter interface  (src/data/storage.ts)
+        ├── JournalAdapter (write-ahead journal in localStorage, wrapping DexieAdapter)
         ├── DexieAdapter   (IndexedDB, default)
         └── MemoryAdapter  (tests, and fallback when IndexedDB is unavailable)
 ```
+
+The store writes through one writer (`createRecordWriter` in `src/host/writer.ts`), which standalone passes everything straight to the adapter. The JournalAdapter records each write synchronously in localStorage and clears it once IndexedDB confirms, so a tab closed mid-write loses nothing; leftovers are replayed on the next start.
 
 - **All writes go through the store's actions**, which update memory first (instant UI) and then persist through the adapter. A failed write raises a visible toast; nothing fails silently.
 - **Domain logic is pure** (`src/lib/*`): the timer, the next-action rules and backup validation take plain data and a `now` value, so they are deterministic in tests.
@@ -56,6 +59,8 @@ Every stored record has `id` (random string), `createdAt` and `updatedAt` (epoch
 | `sessions` | taskId (nullable), kind (focus / short-break / long-break), mode (countdown / flow), plannedMs, startedAt, endedAt, activeMs, notes, distractions, endReason | Actual effort per task is the sum of its focus sessions |
 | `captures` | text, kind (thought / task), source (quick / focus / voice), status (inbox / sorted / dismissed), contextTaskId, sortedTaskId | The visual inbox |
 | `dayItems` | date, taskId, slot (morning / afternoon / evening / later), order, start (HH:MM, optional) | Day Board placements |
+| `placements` | x, y | Hosted only: where the person put a host galaxy (id `g\|<galaxy id>`) or system (id `<verse id>\|<system id>`) |
+| `taskWork` | parked, parkedAt, energy, estimateMin, progress, subtasks, dependsOn, links | Hosted only, not written yet: ORBIT's working state for a host's task (id = the host's task id) |
 | `kv` | `prefs`, `focus` (runtime), `meta` | Single-row records |
 | `tombstones` | table, deletedAt | Sync-ready deletion log |
 
@@ -72,7 +77,7 @@ remaining = plannedMs − elapsed      (countdown only; negative = overtime)
 
 ### Migrations
 
-Dexie versions are declared in `src/data/db.ts`. Version 1 is the original schema; version 2 adds the `tombstones` table and a compound `[date+slot]` index and normalises older task records (missing arrays, missing energy); version 3 turns the flat map into galaxies — groups get centres, project positions become relative to their galaxy (each group's arrangement is kept and spread out), and `prefs.deepSpace` records where ungrouped projects live; version 4 moves galaxies that were still on the old automatic grid onto the spiral (oldest at the centre), leaving any galaxy the user had dragged exactly where it was, and re-places deep space if it was auto-placed. Project positions are relative, so no system moves within its galaxy. Each version's `upgrade()` runs once, in order. The v3 and v4 upgrades were each verified by running the v0.1 build with real-looking data in a persistent browser profile, then swapping in the new build on the same origin (service worker auto-update included). Backups carry `schemaVersion`, and `migrateBackup()` brings older backup files forward before validation. A test opens a real v1 database, writes v1 records, reopens at the current version and checks the upgrade.
+Dexie versions are declared in `src/data/db.ts`. Version 1 is the original schema; version 2 adds the `tombstones` table and a compound `[date+slot]` index and normalises older task records (missing arrays, missing energy); version 3 turns the flat map into galaxies — groups get centres, project positions become relative to their galaxy (each group's arrangement is kept and spread out), and `prefs.deepSpace` records where ungrouped projects live; version 4 moves galaxies that were still on the old automatic grid onto the spiral (oldest at the centre), leaving any galaxy the user had dragged exactly where it was, and re-places deep space if it was auto-placed. Project positions are relative, so no system moves within its galaxy. Version 5 adds the empty `placements` and `taskWork` tables (backups at schema 5 gain both, empty). Each version's `upgrade()` runs once, in order. The v3 and v4 upgrades were each verified by running the v0.1 build with real-looking data in a persistent browser profile, then swapping in the new build on the same origin (service worker auto-update included). Backups carry `schemaVersion`, and `migrateBackup()` brings older backup files forward before validation. A test opens a real v1 database, writes v1 records, reopens at the current version and checks the upgrade.
 
 ### Backup and restore
 
@@ -142,6 +147,19 @@ Breakpoints: `< md` (phones) get purpose-built patterns — card Universe, mini-
 
 ---
 
+## Host hook (running inside another application)
+
+ORBIT can be embedded, in a same-origin frame, by a host application that owns some of the records it shows. The contract is `src/host/PROTOCOL.md` and `src/host/host-protocol-v1.schema.json`. Without a host nothing changes.
+
+- **Finding a host** (`src/host/detect.ts`): `window.orbitHost`, else the parent frame's; the handshake must say protocol 1, otherwise ORBIT says why on screen and runs on its own, in memory. `?orbit-host=demo` installs the built-in demo host (`fakeHost.ts`), used by tests.
+- **Records** (`adapt.ts`): host galaxies, systems and task planets become groups, projects and tasks carrying an in-memory `host` reference (`HostRef`); ids are the host's. Attachments (moons), collections (belts), beacons, clusters and families live in the store's `host` slice. Positions come from `placements`, else deterministic auto-placement.
+- **Storage**: hosted, ORBIT never opens IndexedDB or touches localStorage; it uses `host.store` (a StorageAdapter) for what is its own (positions and preferences in the read-only stage). Every write goes through `createRecordWriter`, which never stores a host record: a host galaxy or system becomes a placement; a host task is dropped in the read-only stage (a later stage routes it to `host.tasks`).
+- **What may change** (`caps.ts`): the host's capabilities, limited by what the build supports (`BUILD_SUPPORTS`; all false in the read-only stage). Store actions that would change a host record are no-ops with a toast naming the host; controls are hidden.
+- **Refresh** (`refresh.ts`): `verse(id, rev)` on focus, when the page becomes visible and every 30 s while visible; "unchanged" changes nothing.
+- **Sky**: survey rings and chips on host galaxies, cluster labels, beacons, moons, belts, and a ring of dots for host systems with more than 40 open tasks; three layer switches kept in `prefs.layers`.
+
+---
+
 ## 4. Phased implementation plan
 
 | Phase | Scope | Status |
@@ -160,9 +178,10 @@ Breakpoints: `< md` (phones) get purpose-built patterns — card Universe, mini-
 | Layer | Tool | What is covered |
 |---|---|---|
 | Pure logic | Vitest | Timer maths (start, pause, resume, overtime, carry-over, clock skew), next-action rules and their explanations, date helpers, backup validation and migration |
-| Persistence | Vitest + fake-indexeddb | Round-trip of every table, v1 → current, v2 → v3 and v3 → v4 schema upgrades (hand-placed galaxies kept), v2/v3 backup migration, restore is all-or-nothing |
+| Persistence | Vitest + fake-indexeddb | Round-trip of every table, v1 → current, v2 → v3, v3 → v4 and v4 → v5 schema upgrades (hand-placed galaxies kept), v2/v3/v4 backup migration, restore is all-or-nothing |
+| Host hook | Vitest + ajv | The demo host against the JSON Schema; verse adaptation, detection and refusal, every read-only guard, host records never stored, refresh and its schedule, the sky's host layers and clutter rules |
 | Store transitions | Vitest | Create → focus → park → resume → complete; one active session only; switching auto-parks; deleting a project cascades; capture sorting |
-| End to end | Playwright (Chrome) | The full vertical slice at desktop and phone sizes, reload persistence mid-session, Day Board drag, backup export/import, universe navigation, dragging a star to another galaxy (Esc cancel, undo, persists on reload), tidy into a spiral |
+| End to end | Playwright (Chrome) | The full vertical slice at desktop and phone sizes, reload persistence mid-session, Day Board drag, backup export/import, universe navigation, dragging a star to another galaxy (Esc cancel, undo, persists on reload), tidy into a spiral; hosted (demo host, a host on the parent frame, a refused host) |
 | Visual | Playwright screenshots | Every view in dark and light, desktop and phone, reviewed by eye before release |
 
 Run `npm test` for unit tests and `npm run e2e` for end-to-end tests (needs a local Chrome).
