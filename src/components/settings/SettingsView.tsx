@@ -1,4 +1,5 @@
 import { useRef, useState, useSyncExternalStore } from 'react';
+import { errorMessage } from '../../lib/errors';
 import { Bell, Coffee, Copy, Download, FolderOpen, HardDrive, Info, Keyboard, MonitorSmartphone, Palette, Sparkles, Timer, Trash2, Upload, Volume2 } from 'lucide-react';
 import { APP_VERSION, DOWNLOAD_URL, SUPPORT_URL, desktop, isFileCopy } from '../../lib/desktop';
 import { useOrbit } from '../../store/store';
@@ -247,7 +248,7 @@ function DataSection() {
           setPasteOpen(false);
           toast({ tone: 'success', text: 'Backup restored.' });
         } catch (e) {
-          toast({ tone: 'danger', text: `Restore failed, nothing was changed. ${e instanceof Error ? e.message : ''}` });
+          toast({ tone: 'danger', text: `Restore failed, nothing was changed. ${errorMessage(e)}` });
         } finally {
           setBusy(false);
         }

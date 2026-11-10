@@ -26,6 +26,7 @@ import type { HostAbilities } from './caps';
 import { refusal } from './caps';
 import type { HostTasks, Planet } from './types';
 import { placementKey, planetToTask } from './adapt';
+import { errorMessage } from '../lib/errors';
 import { HOST_FIELDS, hostStatusOf, hostView, isDefaultWork, sameWork, workOf, type HostView } from './work';
 
 export interface WriteOptions {
@@ -108,10 +109,8 @@ function placementFor(h: HostedWriting, table: TableName, rec: { id: string } & 
   return null;
 }
 
-const message = (e: unknown, fallback: string) => {
-  const m = e instanceof Error ? e.message : typeof e === 'string' ? e : '';
-  return m.trim() || fallback;
-};
+/** The host's words for a rejection (realm-independent: a host in the parent frame rejects with its own Error). */
+const message = (e: unknown, fallback: string) => errorMessage(e, fallback);
 
 const hostViewOfPlanet = (p: Planet): HostView => hostView(planetToTask('', p));
 

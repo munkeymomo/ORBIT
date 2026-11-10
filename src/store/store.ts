@@ -1,4 +1,5 @@
 import { createStore, type StoreApi } from 'zustand/vanilla';
+import { errorMessage } from '../lib/errors';
 import { useStore } from 'zustand';
 import type {
   Capture,
@@ -671,7 +672,7 @@ export function createOrbitStore(deps: StoreDeps = {}): StoreApi<OrbitState> {
         if (isUnchanged(v)) throw new Error('it answered “unchanged” to a full request');
         applyVerse(v);
       } catch (e) {
-        set({ host: { ...get().host!, error: `Could not load from ${ab.name}: ${e instanceof Error ? e.message : String(e)}` } });
+        set({ host: { ...get().host!, error: `Could not load from ${ab.name}: ${errorMessage(e)}` } });
       }
     };
 
@@ -719,7 +720,7 @@ export function createOrbitStore(deps: StoreDeps = {}): StoreApi<OrbitState> {
         } catch (e) {
           console.error(e);
           snap = emptySnapshot();
-          storageError = `Could not read saved data: ${e instanceof Error ? e.message : String(e)}`;
+          storageError = `Could not read saved data: ${errorMessage(e)}`;
         }
         // Preferences may come from an older ORBIT, or from a host's store: fill in anything missing.
         snap.prefs = { ...DEFAULT_PREFS, ...(snap.prefs ?? {}), layers: { ...DEFAULT_PREFS.layers, ...(snap.prefs?.layers ?? {}) } };
@@ -758,7 +759,7 @@ export function createOrbitStore(deps: StoreDeps = {}): StoreApi<OrbitState> {
           applyVerse(v);
           goStartAt();
         } catch (e) {
-          set({ host: { ...get().host!, error: `Could not load from ${ab.name}: ${e instanceof Error ? e.message : String(e)}` } });
+          set({ host: { ...get().host!, error: `Could not load from ${ab.name}: ${errorMessage(e)}` } });
         }
         set({ ready: true });
       },
@@ -775,7 +776,7 @@ export function createOrbitStore(deps: StoreDeps = {}): StoreApi<OrbitState> {
           if (!info || info.protocol !== HOST_PROTOCOL || !Array.isArray(info.verses) || !info.verses.length) throw new Error('its handshake is no longer usable');
           set({ host: { ...get().host!, info } });
         } catch (e) {
-          set({ host: { ...get().host!, error: `Could not refresh from ${can().name}: ${e instanceof Error ? e.message : String(e)}` } });
+          set({ host: { ...get().host!, error: `Could not refresh from ${can().name}: ${errorMessage(e)}` } });
           return;
         }
         const h = get().host!;
@@ -787,7 +788,7 @@ export function createOrbitStore(deps: StoreDeps = {}): StoreApi<OrbitState> {
           }
           applyVerse(v);
         } catch (e) {
-          set({ host: { ...get().host!, error: `Could not refresh from ${can().name}: ${e instanceof Error ? e.message : String(e)}` } });
+          set({ host: { ...get().host!, error: `Could not refresh from ${can().name}: ${errorMessage(e)}` } });
         }
       },
       openInHost: (target) => {
@@ -795,7 +796,7 @@ export function createOrbitStore(deps: StoreDeps = {}): StoreApi<OrbitState> {
         try {
           hostApi.open({ kind: target.kind, id: target.id });
         } catch (e) {
-          get().toast({ tone: 'danger', text: `${can().name} could not open it: ${e instanceof Error ? e.message : String(e)}` });
+          get().toast({ tone: 'danger', text: `${can().name} could not open it: ${errorMessage(e)}` });
         }
       },
       abilities: () => can(),
@@ -830,7 +831,7 @@ export function createOrbitStore(deps: StoreDeps = {}): StoreApi<OrbitState> {
           const changed = await hostApi.pick(family, pickCtx);
           if (changed) await get().refreshHost();
         } catch (e) {
-          get().toast({ tone: 'danger', text: `${can().name}: ${e instanceof Error ? e.message : String(e)}`, timeout: 8000 });
+          get().toast({ tone: 'danger', text: `${can().name}: ${errorMessage(e)}`, timeout: 8000 });
         }
       },
       hostAction: async (id, actionCtx) => {
@@ -840,7 +841,7 @@ export function createOrbitStore(deps: StoreDeps = {}): StoreApi<OrbitState> {
           if (changed) await get().refreshHost();
           return !!changed;
         } catch (e) {
-          get().toast({ tone: 'danger', text: `${can().name}: ${e instanceof Error ? e.message : String(e)}`, timeout: 8000 });
+          get().toast({ tone: 'danger', text: `${can().name}: ${errorMessage(e)}`, timeout: 8000 });
           return false;
         }
       },
@@ -868,7 +869,7 @@ export function createOrbitStore(deps: StoreDeps = {}): StoreApi<OrbitState> {
           answer = await hostApi.adopt(batch);
         } catch (e) {
           // nothing has changed here: every task stays ORBIT's own
-          get().toast({ tone: 'danger', text: `${a.name}: ${e instanceof Error ? e.message : String(e)}`, timeout: 8000 });
+          get().toast({ tone: 'danger', text: `${a.name}: ${errorMessage(e)}`, timeout: 8000 });
           return 0;
         }
         if (!answer) return 0; // the person cancelled in the host's dialog

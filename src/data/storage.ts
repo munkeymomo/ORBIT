@@ -1,4 +1,5 @@
 import type { FocusRuntime, Prefs, Snapshot, TableName } from '../types';
+import { errorMessage } from '../lib/errors';
 import { OrbitDB } from './db';
 import { DEFAULT_PREFS } from './normalise';
 
@@ -311,6 +312,6 @@ export async function openStorage(): Promise<{ adapter: StorageAdapter; error: s
     ]);
     return { adapter: new JournalAdapter(db), error: null };
   } catch (e) {
-    return { adapter: new MemoryAdapter(), error: e instanceof Error ? e.message : String(e) };
+    return { adapter: new MemoryAdapter(), error: errorMessage(e) };
   }
 }

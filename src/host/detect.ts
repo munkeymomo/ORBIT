@@ -12,6 +12,7 @@
  * "take these tasks" dialog does; `&at=planet:<id>` (or `system:`, `galaxy:`) sets where ORBIT goes first.
  */
 import { HOST_PROTOCOL, type Handshake, type OrbitHost, type StartAt } from './types';
+import { errorMessage } from '../lib/errors';
 
 export type Detection =
   | { kind: 'none' }
@@ -95,7 +96,7 @@ export async function detectHost(win: Window = window, opts: { timeoutMs?: numbe
         name: p.get('name')?.trim() || undefined,
       });
     } catch (e) {
-      return refused(`The demo host could not start: ${e instanceof Error ? e.message : String(e)}`);
+      return refused(`The demo host could not start: ${errorMessage(e)}`);
     }
   }
   const host = findHost(win);
@@ -112,6 +113,6 @@ export async function detectHost(win: Window = window, opts: { timeoutMs?: numbe
       return refused('The host is missing part of protocol 1 (verse() or store).');
     return { kind: 'host', host, info };
   } catch (e) {
-    return refused(`The host did not complete the handshake: ${e instanceof Error ? e.message : String(e)}`);
+    return refused(`The host did not complete the handshake: ${errorMessage(e)}`);
   }
 }
