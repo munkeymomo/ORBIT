@@ -4,7 +4,7 @@
  * together to label one by one, and the boxes nothing may cover (a system's own name, its star, its dates).
  */
 import { clamp } from '../../lib/util';
-import { circleRect, collapseWhenCrowded, placeOrbitLabels, wrapMiddle, type Measure, type OrbitLabel, type Rect } from './labels';
+import { circleRect, collapseWhenCrowded, overlaps, placeOrbitLabels, wrapMiddle, type Measure, type OrbitLabel, type Rect } from './labels';
 import { galaxyBeaconSpot, LOD, systemBeaconSpot, type GalaxyPlace, type Size, type SystemPlace, type View } from './space';
 import type { Beacon } from '../../host/types';
 import { changedText } from '../../host/changed';
@@ -53,6 +53,28 @@ export function starNameRect(s: SystemPlace, sx: number, sy: number, k: number, 
   const w = Math.min(STAR_NAME_W, Math.max(measure(meta), ...lines.map((l) => measure(l) * scale * 1.06)) + 20);
   const h = lines.length * (rs >= 30 ? 19 : 17) + 21;
   return { x: sx - w / 2, y: sy + rs + 6 + 8, w, h };
+}
+
+/**
+ * Whether the selected planet's brackets would sit on the line of counts under its star's name (a planet directly
+ * below the star, on the first orbit). The brackets win: the counts line is not drawn then (the name stays; the counts are in
+ * the star's accessible name and its panel).
+ */
+export function selectedCoversMeta(s: SystemPlace, sx: number, sy: number, k: number, selectedId: string | null, measure: Measure): boolean {
+  if (!selectedId || s.busy) return false;
+  const ti = s.pv.tasks.findIndex((tv) => tv.task.id === selectedId);
+  const ii = (s.pv.items ?? []).findIndex((iv) => iv.item.id === selectedId);
+  const sl = ti >= 0 ? s.slots[ti] : ii >= 0 ? s.slots[s.pv.tasks.length + ii] : undefined;
+  if (!sl) return false;
+  // the brackets: a square round the planet, out to d/2 + 15 (see SelectedMark)
+  const d = clamp(sl.d * k, 14, 64);
+  const half = d / 2 + 15;
+  const px = sx + sl.x * k;
+  const py = sy + sl.y * k;
+  const box = starNameRect(s, sx, sy, k, measure);
+  const meta: Rect = { x: box.x, y: box.y + box.h - 19, w: box.w, h: 19 };
+  const br: Rect = { x: px - half, y: py - half, w: 2 * half, h: 2 * half };
+  return overlaps(br, meta, 2);
 }
 
 /** The one-line summary under a star, as StarNode words it: TASK counts, and "n items" for a system that holds items. */

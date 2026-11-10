@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { buildModel } from '../../src/components/universe/model';
 import { buildSpace, CLUTTER } from '../../src/components/universe/space';
-import { layoutSky, starShowsMeta, starSummary } from '../../src/components/universe/skyLabels';
+import { layoutSky, selectedCoversMeta, starShowsMeta, starSummary } from '../../src/components/universe/skyLabels';
 import { changedInSystem, changedMoons, changedText } from '../../src/host/changed';
 import { adaptVerse } from '../../src/host/adapt';
 import { abilities } from '../../src/host/caps';
@@ -165,5 +165,26 @@ describe('the count line under a star', () => {
     // a system with nothing to count keeps the old rule
     const empty = world([task('t1', 's3', [])]).sys('s3').pv;
     expect(starShowsMeta({ ...empty, radius: 40 }, 0.2)).toBe(false);
+  });
+});
+
+describe('the count line and the selected planet', () => {
+  it('the selected planet’s brackets win over the "n items" line when the planet sits directly below its star', () => {
+    const w = world(Array.from({ length: 6 }, (_, i) => item(`p${i}`, 's1', [])));
+    const s = w.sys('s1');
+    const measure = (t: string) => t.length * 6;
+    // slot 3 of a ring of six is straight down from the star
+    expect(Math.abs(s.slots[3].x)).toBeLessThan(1);
+    expect(s.slots[3].y).toBeGreaterThan(0);
+        for (const k of [0.7, 1]) {
+      expect(selectedCoversMeta(s, 0, 0, k, 'p3', measure), `k=${k}`).toBe(true);
+      // the planet at the top, or none, leaves the line alone
+      expect(selectedCoversMeta(s, 0, 0, k, 'p0', measure)).toBe(false);
+      expect(selectedCoversMeta(s, 0, 0, k, null, measure)).toBe(false);
+    }
+    // closer in than that the planet clears the line, so the line stays
+    for (const k of [1.4, 2]) expect(selectedCoversMeta(s, 0, 0, k, 'p3', measure), `k=${k}`).toBe(false);
+    // a planet far to the side does not touch it
+    expect(selectedCoversMeta(s, 0, 0, 1, 'p1', measure)).toBe(false);
   });
 });

@@ -43,7 +43,7 @@ import {
 } from './space';
 import { SpacePainter } from './SpacePainter';
 import { circleRect, moonListPlacement, outsideSystem, overlaps, type Measure, type OrbitLabel } from './labels';
-import { layoutSky, STAR_NAME_W, starNameLines, starShowsMeta, starNameRect, starRadius } from './skyLabels';
+import { layoutSky, STAR_NAME_W, starNameLines, starShowsMeta, selectedCoversMeta, starNameRect, starRadius } from './skyLabels';
 import { requestPanelSection } from '../task/panelSection';
 
 /** Text widths for label layout, measured with the same font the labels use (an estimate without a canvas). */
@@ -885,6 +885,7 @@ export function UniverseCanvas({ onNewSystem, onNewGalaxy }: { onNewSystem: (gal
                   selected={selection?.type === 'project' && selection.id === s.pv.project.id}
                   current={ctx.system?.pv.project.id === s.pv.project.id}
                   close={k >= LOD.planets && !s.busy}
+                  metaHidden={k >= LOD.planets && selectedCoversMeta(s, sx, sy, k, selectedPlanet, measureLabel)}
                   faded={ctx.system?.pv.project.id !== s.pv.project.id && sy - clamp(s.pv.radius * k, 9, 66) < (size.top ?? 76)}
                   away={!!ctx.system && ctx.system.pv.project.id !== s.pv.project.id && k >= LOD.planets}
                   clipped={ui.some((r) => overlaps(circleRect(sx, sy, starRadius(s, k) + 8), r) || overlaps(starNameRect(s, sx, sy, k, measureLabel), r))}
@@ -1424,6 +1425,7 @@ function StarNode({
   selected,
   current,
   close = false,
+  metaHidden = false,
   faded = false,
   clipped = false,
   away = false,
@@ -1449,6 +1451,8 @@ function StarNode({
   current: boolean;
   /** Planets are drawn round it: counts go under its name, not on the star (where planets pass). */
   close?: boolean;
+  /** The selected planet's brackets sit where the counts line would be: they win, the line is not drawn. */
+  metaHidden?: boolean;
   /** Under the toolbar (a neighbour of the system in view): drawn faint. */
   faded?: boolean;
   dimmed: boolean;
@@ -1545,7 +1549,7 @@ function StarNode({
           </span>
         ))}
       </div>
-      {showMeta && (
+      {showMeta && !metaHidden && (
         <div className="tabular flex justify-center text-[11.5px] whitespace-nowrap text-muted [text-shadow:0_0_3px_#000,0_1px_8px_rgba(0,0,0,.95)]">
           <span className="min-w-0 truncate">
           {project.host?.code ? `${project.host.code} · ` : ''}
