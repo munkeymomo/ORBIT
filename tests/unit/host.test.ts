@@ -84,7 +84,9 @@ describe('the fake host speaks protocol 1 (validated against the JSON Schema)', 
     const v = demoVerse(NOW);
     expect(v.galaxies.some((g) => g.finished)).toBe(true);
     expect(v.galaxies.some((g) => g.virtual)).toBe(true);
-    expect(new Set(v.galaxies.filter((g) => g.cluster).map((g) => g.cluster)).size).toBe(1);
+    // two clusters: one of three galaxies, one of two
+    expect(new Set(v.galaxies.filter((g) => g.cluster).map((g) => g.cluster)).size).toBe(2);
+    expect(v.galaxies.filter((g) => g.cluster === 'c-trade').length).toBe(2);
     expect(v.galaxies.filter((g) => g.cluster).length).toBeGreaterThanOrEqual(2);
     expect(v.systems.some((s) => s.virtual)).toBe(true);
     expect(v.systems.some((s) => s.note)).toBe(true);

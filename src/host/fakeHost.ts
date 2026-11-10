@@ -92,7 +92,8 @@ export function demoVerse(now = Date.now()): Verse {
     { id: 'g-garden', name: 'Garden', color: 'lime', chip: 'Outdoor · in season', status: 'in season', cluster: 'c-home', facts: [{ label: 'Plot', value: 'Back garden, 12 m' }], open: open('area', 'g-garden') },
     { id: 'g-move', name: 'House move', color: 'sky', chip: 'Move · booked', status: 'booked', cluster: 'c-home', open: open('area', 'g-move') },
     { id: 'g-workshop', name: 'Workshop', color: 'amber', chip: 'Indoor · slow', cluster: 'c-home', open: open('area', 'g-workshop') },
-    { id: 'g-bakery', name: 'Bakery', color: 'coral', chip: 'Shop · open', status: 'open', facts: [{ label: 'Opens', value: 'Tue–Sat' }], open: open('area', 'g-bakery') },
+    { id: 'g-bakery', name: 'Bakery', color: 'coral', chip: 'Shop · open', status: 'open', cluster: 'c-trade', facts: [{ label: 'Opens', value: 'Tue–Sat' }], open: open('area', 'g-bakery') },
+    { id: 'g-market', name: 'Saturday market stall', color: 'violet', chip: 'Stall · weekly', cluster: 'c-trade', open: open('area', 'g-market') },
     { id: 'g-flat', name: 'Old flat', color: 'sand', chip: 'Move · finished', status: 'finished', finished: true },
     { id: 'g-loose', name: 'Loose ends', virtual: true },
   ];
@@ -108,6 +109,9 @@ export function demoVerse(now = Date.now()): Verse {
     { id: 's-recipes', galaxy: 'g-bakery', name: 'Recipes', code: 'BK-2', color: 'rose', open: open('plan', 's-recipes') },
     { id: 's-keys', galaxy: 'g-flat', name: 'Hand back keys', code: 'OF-1', color: 'sand' },
     { id: 's-nowhere', galaxy: 'g-loose', name: 'Filed nowhere', virtual: true, note: 'Tasks that belong to no plan yet.' },
+    { id: 's-passing', galaxy: 'g-loose', name: 'Noted in passing and waiting for a plan of their own', virtual: true },
+    { id: 's-refit', galaxy: 'g-workshop', name: 'Spare room refit', code: 'WS-2', status: 'under way', color: 'teal', open: open('plan', 's-refit') },
+    { id: 's-stall', galaxy: 'g-market', name: 'Stall kit', code: 'MK-1', color: 'violet', open: open('plan', 's-stall') },
     { id: 's-odd', galaxy: null, name: 'Odd jobs', color: 'teal' },
   ];
 
@@ -162,9 +166,39 @@ export function demoVerse(now = Date.now()): Verse {
     task('t-keys', 's-keys', 'Return the spare keys', { status: 'done', completedAt: now - 86_400_000 * 40 }),
     task('t-receipt', 's-nowhere', 'Find the boiler receipt', { priority: 2 }),
     task('t-bike', 's-odd', 'Pump up the bike tyres', { priority: 1 }),
+    task('t-note', 's-passing', 'Ask next door about the shared fence', { priority: 1 }),
+    task('t-gazebo', 's-stall', 'Replace the torn gazebo side panel', { priority: 3, due: day(4) }),
+    task('t-float', 's-stall', 'Count the cash float', { priority: 2 }),
+    task('t-sign', 's-stall', 'Repaint the price board', { priority: 1 }),
     // an item planet: out of scope for this stage, and must be skipped safely
     { id: 'i-oven', system: 's-recipes', type: 'item', title: 'Deck oven', kind: 'equipment', family: 'tool', state: 'live' },
   ];
+  // a system with a dozen tasks with long titles (labels that need room), some late and some with moons
+  const refit = [
+    'Strip the old wallpaper from the chimney breast',
+    'Fill and sand the cracks above the window frame',
+    'Choose a paint colour for the north-facing wall',
+    'Measure up for the fitted wardrobe doors',
+    'Order skirting board and quarter-round beading',
+    'Move the radiator valve before the floor goes down',
+    'Lay the underlay and the oak-effect flooring',
+    'Rehang the door after trimming the bottom edge',
+    'Fit a dimmer switch and a second double socket',
+    'Seal around the window with decorator’s caulk',
+    'Put up the curtain pole and the blackout lining',
+    'Find a home for everything that was in the room',
+  ];
+  refit.forEach((title, i) =>
+    planets.push(
+      task(`t-refit-${i + 1}`, 's-refit', title, {
+        priority: (1 + ((i * 3) % 4)) as 1 | 2 | 3 | 4,
+        due: i % 4 === 1 ? day(-1 - i) : i % 3 === 0 ? day(i + 2) : null,
+        ...(i % 4 === 1
+          ? { attachments: [att(`a-refit-${i}-a`, 'tool', 'Sander'), att(`a-refit-${i}-b`, 'supplier', 'Builders’ merchant'), att(`a-refit-${i}-c`, 'doc', 'Room plan')], more: 2 }
+          : {}),
+      }),
+    ),
+  );
   for (let i = 1; i <= 46; i++)
     planets.push(task(`t-order-${i}`, 's-orders', `Order ${100 + i}: ${['sourdough', 'rye', 'seeded', 'focaccia', 'brioche'][i % 5]} loaves`, { priority: (1 + (i % 4)) as 1 | 2 | 3 | 4, due: day((i % 9) - 3) }));
   planets.push(task('t-order-done', 's-orders', 'Order 99: croissants', { status: 'done', completedAt: now - 86_400_000 }));
@@ -184,6 +218,23 @@ export function demoVerse(now = Date.now()): Verse {
       open: open('holds', 's-greenhouse'),
     },
     { system: 's-recipes', total: 140, counts: { doc: 92, photo: 48 }, open: open('holds', 's-recipes') },
+    {
+      system: 's-refit',
+      total: 10,
+      items: [
+        att('b-tile', 'supplier', 'Tile shop'),
+        att('b-dust', 'tool', 'Dust sheets'),
+        att('b-roller', 'tool', 'Paint roller'),
+        att('b-quote', 'doc', 'Electrician’s quote'),
+        att('b-swatch', 'photo', 'Paint swatches'),
+        att('b-ladder', 'tool', 'Step ladder'),
+        att('b-receipt', 'doc', 'Flooring receipt'),
+        att('b-before', 'photo', 'Room before'),
+        att('b-filler', 'tool', 'Filler knife'),
+        att('b-plan2', 'doc', 'Wardrobe drawing'),
+      ],
+      open: open('holds', 's-refit'),
+    },
   ];
 
   const beacons: Beacon[] = [
@@ -196,13 +247,18 @@ export function demoVerse(now = Date.now()): Verse {
     { id: 'm-keys', system: 's-packing', code: 'D2', title: 'Keys handed over', due: day(30), state: 'planned' },
     { id: 'm-market', system: 's-orders', code: 'D3', title: 'Weekend market', due: day(-1), state: 'late', serves: 12 },
     { id: 'm-move', galaxy: 'g-move', code: 'M1', title: 'Moving day', due: day(14), state: 'planned', serves: 9 },
+    { id: 'm-paint', system: 's-refit', code: 'R1', title: 'Painting done', due: day(9), state: 'planned', serves: 3 },
+    { id: 'm-floor', system: 's-refit', code: 'R2', title: 'Floor down', due: day(16), state: 'planned', serves: 2 },
   ];
 
   return {
     verse: 'main',
     rev: '1',
     families: FAMILIES,
-    clusters: [{ id: 'c-home', name: 'Around the house', open: open('group', 'c-home') }],
+    clusters: [
+      { id: 'c-home', name: 'Around the house', open: open('group', 'c-home') },
+      { id: 'c-trade', name: 'Trade and markets', open: open('group', 'c-trade') },
+    ],
     galaxies,
     systems,
     planets,

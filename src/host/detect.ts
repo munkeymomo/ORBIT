@@ -91,6 +91,8 @@ export async function detectHost(win: Window = window, opts: { timeoutMs?: numbe
         adopt: adopt === 'some' || adopt === 'cancel' || adopt === 'fail' ? adopt : 'all',
         // `&at=galaxy:<id>`, `system:<id>` or `planet:<id>`: where to go first (host.at)
         at: startAtParam(p.get('at')),
+        // `&name=<words>`: the host's name (to see how long names fit)
+        name: p.get('name')?.trim() || undefined,
       });
     } catch (e) {
       return refused(`The demo host could not start: ${e instanceof Error ? e.message : String(e)}`);

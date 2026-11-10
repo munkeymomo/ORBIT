@@ -106,7 +106,7 @@ describe('filters for host records', () => {
   it('"Has linked items" keeps only tasks with moons', () => {
     const { model } = sky(demoVerse(NOW), { hasLinked: true });
     const shown = model.flatMap((pv) => pv.tasks.map((t) => t.task.id));
-    expect(shown.sort()).toEqual(['t-boxes', 't-raised-bed', 't-soil', 't-trays', 't-van'].sort());
+    expect(shown.sort()).toEqual(['t-boxes', 't-raised-bed', 't-soil', 't-trays', 't-van', 't-refit-2', 't-refit-6', 't-refit-10'].sort());
     expect(model.find((pv) => pv.project.id === 's-pond')!.matches).toBe(false);
   });
 
