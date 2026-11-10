@@ -39,6 +39,12 @@ export interface Also {
   note?: string;
 }
 
+/** Something the host does in a dialog of its own, offered as a button: `host.action(id, {verse, galaxy?, system?})`. */
+export interface HostAction {
+  id: string;
+  label: string;
+}
+
 export interface Family {
   label: string;
   /** #rrggbb */
@@ -60,6 +66,8 @@ export interface VerseInfo {
   editable: boolean;
   /** False when the person has hidden this verse. */
   shown?: boolean;
+  /** Offered beside the verse switcher (e.g. "New …"). */
+  actions?: HostAction[];
 }
 
 /** What the host allows as a whole. */
@@ -115,6 +123,8 @@ export interface Galaxy {
   caps?: Caps;
   open?: Open;
   also?: Also[];
+  /** Offered in the galaxy's panel. */
+  actions?: HostAction[];
 }
 
 /** A faint label around galaxies that belong together. */
@@ -143,6 +153,8 @@ export interface System {
   caps?: Caps;
   open?: Open;
   also?: Also[];
+  /** Offered in the system's panel. */
+  actions?: HostAction[];
 }
 
 export type AttachmentState = 'live' | 'archived' | 'gone';
@@ -225,7 +237,7 @@ export interface Beacon {
   open?: Open;
 }
 
-/** A relation between two planets of one verse (never 'blocked by'). Not drawn yet. */
+/** A relation between two planets of one verse, such as "made from" (never 'blocked by'). */
 export interface Arrow {
   from: string;
   to: string;
@@ -297,6 +309,8 @@ export interface AdoptResult {
 
 /** `host.at`: where ORBIT goes first. The most precise id ORBIT has wins (planet, then system, then galaxy). */
 export interface StartAt {
+  /** The verse to open first (instead of the handshake's `start`), when it is offered. */
+  verse?: string;
   galaxy?: string;
   system?: string;
   planet?: string;

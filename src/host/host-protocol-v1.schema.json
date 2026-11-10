@@ -48,6 +48,16 @@
         "additionalProperties": false
       }
     },
+    "actions": {
+      "description": "Things the host does in a dialog of its own, offered as buttons; clicking one calls host.action(id, {verse, galaxy?, system?}).",
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": { "id": { "$ref": "#/$defs/id" }, "label": { "type": "string", "minLength": 1 } },
+        "required": ["id", "label"],
+        "additionalProperties": false
+      }
+    },
     "family": {
       "type": "object",
       "properties": {
@@ -71,7 +81,8 @@
         "plain": { "type": "string", "description": "The plain word shown under the name." },
         "legend": { "type": "string", "description": "One line: what size, colour, ring and moons mean here." },
         "editable": { "type": "boolean" },
-        "shown": { "type": "boolean", "description": "False when the person has hidden this verse." }
+        "shown": { "type": "boolean", "description": "False when the person has hidden this verse." },
+        "actions": { "$ref": "#/$defs/actions", "description": "Offered beside the verse switcher (e.g. \"New …\")." }
       },
       "required": ["id", "name", "plain", "legend", "editable"],
       "additionalProperties": false
@@ -141,7 +152,8 @@
         "facts": { "type": "array", "items": { "$ref": "#/$defs/fact" } },
         "caps": { "$ref": "#/$defs/caps" },
         "open": { "$ref": "#/$defs/open" },
-        "also": { "$ref": "#/$defs/also" }
+        "also": { "$ref": "#/$defs/also" },
+        "actions": { "$ref": "#/$defs/actions", "description": "Offered in the galaxy's panel." }
       },
       "required": ["id", "name"],
       "additionalProperties": false
@@ -175,7 +187,8 @@
         "facts": { "type": "array", "items": { "$ref": "#/$defs/fact" } },
         "caps": { "$ref": "#/$defs/caps" },
         "open": { "$ref": "#/$defs/open" },
-        "also": { "$ref": "#/$defs/also" }
+        "also": { "$ref": "#/$defs/also" },
+        "actions": { "$ref": "#/$defs/actions", "description": "Offered in the system's panel." }
       },
       "required": ["id", "galaxy", "name"],
       "additionalProperties": false
