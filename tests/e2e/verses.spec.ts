@@ -181,3 +181,15 @@ test('a galaxy\'s words never show through the minimap', async ({ page }, info) 
   await page.mouse.up();
   await expect.poll(opacity).toBe(0);
 });
+
+test('inside a system, the planets of its neighbours are drawn faint', async ({ page }, info) => {
+  test.skip(info.project.name === 'phone', 'desktop canvas');
+  await openDemo(page);
+  await intoGalaxy(page, 'Workshop');
+  await page.getByRole('button', { name: /^Spare room refit\./ }).click();
+  await expect(crumbs(page).getByText('Spare room refit')).toBeVisible();
+  await page.waitForTimeout(1200);
+  const opacities = await page.locator('[data-fade]').evaluateAll((els) => els.map((e) => Number(getComputedStyle(e).opacity)));
+  expect(opacities.filter((o) => o <= 0.15).length).toBeGreaterThanOrEqual(1); // Shelves' planet
+  expect(opacities.filter((o) => o >= 0.6).length).toBeGreaterThanOrEqual(8); // the refit's own
+});

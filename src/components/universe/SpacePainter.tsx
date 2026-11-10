@@ -51,7 +51,10 @@ export function SpacePainter({
   galaxyBoxes,
   hosted = false,
   selectedPlanet = null,
+  focusSystem = null,
 }: {
+  /** The system the view is inside: other systems' moons are drawn faint. */
+  focusSystem?: string | null;
   /** The selected task or item (its moons keep clear of its brackets). */
   selectedPlanet?: string | null;
   /** Hosted: ORBIT's own galaxies get a thin solid rim (the host's have the dashed survey ring). */
@@ -351,6 +354,7 @@ export function SpacePainter({
           });
         }
         if (layers.moons && k >= LOD.planets) {
+          const far = focusSystem && s.pv.project.id !== focusSystem ? 0.2 : 1;
           // the selected planet's brackets, which no other planet's "+n" may sit on
           let keep: { x: number; y: number; r: number } | undefined;
           const nT = s.pv.tasks.length;
@@ -365,7 +369,7 @@ export function SpacePainter({
             const lab = planetLabels?.get(tv.task.id);
             // the arc sits away from the planet's name; with no name shown, on the side facing the star
             const away = lab?.shown ? AWAY[lab.side] : Math.atan2(-sl.y, -sl.x);
-            drawMoons(g, tv.moons, families, sx + sl.x * k, sy + sl.y * k, d, k, away, (dim && !tv.matches ? 0.3 : 1) * sDim, tv.task.id === selectedPlanet, tv.task.id === selectedPlanet ? undefined : keep);
+            drawMoons(g, tv.moons, families, sx + sl.x * k, sy + sl.y * k, d, k, away, (dim && !tv.matches ? 0.3 : 1) * sDim * far, tv.task.id === selectedPlanet, tv.task.id === selectedPlanet ? undefined : keep);
           });
           const nt = s.pv.tasks.length;
           (s.pv.items ?? []).forEach((iv, j) => {
@@ -374,7 +378,7 @@ export function SpacePainter({
             const d = clamp(sl.d * k, 14, 64);
             const lab = planetLabels?.get(iv.item.id);
             const away = lab?.shown ? AWAY[lab.side] : Math.atan2(-sl.y, -sl.x);
-            drawMoons(g, iv.item.moons, families, sx + sl.x * k, sy + sl.y * k, d, k, away, (dim && !iv.matches ? 0.3 : 1) * sDim * (iv.item.ghost ? 0.5 : 1), iv.item.id === selectedPlanet, iv.item.id === selectedPlanet ? undefined : keep);
+            drawMoons(g, iv.item.moons, families, sx + sl.x * k, sy + sl.y * k, d, k, away, (dim && !iv.matches ? 0.3 : 1) * sDim * far * (iv.item.ghost ? 0.5 : 1), iv.item.id === selectedPlanet, iv.item.id === selectedPlanet ? undefined : keep);
           });
         }
       }
@@ -431,7 +435,7 @@ export function SpacePainter({
     vg.addColorStop(1, 'rgba(0,0,0,0.45)');
     g.fillStyle = vg;
     g.fillRect(0, 0, w, h);
-  }, [view, size, galaxies, dim, today, showDeps, universeLevel, dropTarget, draggingId, families, clusters, layers, planetLabels, crowded, arrows, arrowFocus]);
+  }, [view, size, galaxies, dim, today, showDeps, universeLevel, dropTarget, draggingId, families, clusters, layers, planetLabels, crowded, arrows, arrowFocus, focusSystem]);
 
   return <canvas ref={ref} data-sky className="pointer-events-none absolute inset-0 h-full w-full" aria-hidden />;
 }

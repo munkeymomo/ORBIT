@@ -785,6 +785,7 @@ export function UniverseCanvas({ onNewSystem, onNewGalaxy }: { onNewSystem: (gal
             galaxyBoxes={galaxyLabels ?? undefined}
             hosted={can.hosted}
             selectedPlanet={selectedPlanet}
+            focusSystem={ctx.system?.pv.project.id ?? null}
           />
         )}
 
@@ -865,6 +866,7 @@ export function UniverseCanvas({ onNewSystem, onNewGalaxy }: { onNewSystem: (gal
                   current={ctx.system?.pv.project.id === s.pv.project.id}
                   close={k >= LOD.planets && !s.busy}
                   faded={ctx.system?.pv.project.id !== s.pv.project.id && sy - clamp(s.pv.radius * k, 9, 66) < (size.top ?? 76)}
+                  away={!!ctx.system && ctx.system.pv.project.id !== s.pv.project.id && k >= LOD.planets}
                   clipped={ui.some((r) => overlaps(circleRect(sx, sy, starRadius(s, k) + 8), r) || overlaps(starNameRect(s, sx, sy, k, measureLabel), r))}
                   dimmed={dim && !s.pv.matches}
                   dragging={drag?.kind === 'system' && drag.id === s.pv.project.id}
@@ -973,6 +975,7 @@ export function UniverseCanvas({ onNewSystem, onNewGalaxy }: { onNewSystem: (gal
                     today={today}
                     label={skyWords.planets.get(tv.task.id)}
                     selected={selection?.type === 'task' && selection.id === tv.task.id}
+                    away={!!ctx.system && ctx.system.pv.project.id !== s.pv.project.id}
                     dimmed={dim && (!s.pv.matches || ((!!query || !!filter.uses) && !tv.matches))}
                     onClick={() => onPlanetClick(s, tv.task.id)}
                     onHover={(on) => setHovered(on ? tv.task.id : null)}
@@ -995,6 +998,7 @@ export function UniverseCanvas({ onNewSystem, onNewGalaxy }: { onNewSystem: (gal
                     lightAngle={Math.atan2(-sl.y, -sl.x)}
                     label={skyWords.planets.get(iv.item.id)}
                     selected={selection?.type === 'item' && selection.id === iv.item.id}
+                    away={!!ctx.system && ctx.system.pv.project.id !== s.pv.project.id}
                     dimmed={dim && (!s.pv.matches || (!!query && !iv.matches))}
                     onClick={() => onItemClick(s, iv.item.id)}
                     onHover={(on) => setHovered(on ? iv.item.id : null)}
@@ -1402,6 +1406,7 @@ function StarNode({
   close = false,
   faded = false,
   clipped = false,
+  away = false,
   dimmed,
   dragging,
   onPointerDown,
@@ -1410,6 +1415,8 @@ function StarNode({
   onPortal,
 }: {
   s: SystemPlace;
+  /** Beside the system in view: the star and its name are drawn faint (but still click through to it). */
+  away?: boolean;
   /** Under the minimap or the zoom control: not drawn. */
   clipped?: boolean;
   /** A portal: the chip's words ("to Things"). */
@@ -1443,7 +1450,7 @@ function StarNode({
   if (portalTo) return <PortalNode s={s} x={x} y={y} rs={rs} label={label} chip={portalTo} selected={selected} current={current} faded={faded || clipped} dimmed={dimmed} dragging={dragging} onPointerDown={onPointerDown} onClick={onClick} onPortal={onPortal} />;
   return (
     <>
-    <div className={cx('absolute', (faded || clipped) && 'pointer-events-none')} style={{ left: x, top: y, width: 0, height: 0, opacity: clipped ? 0 : dimmed ? 0.3 : faded ? 0.35 : 1, zIndex: dragging ? 30 : selected ? 22 : 18 }}>
+    <div className={cx('absolute', (faded || clipped) && 'pointer-events-none')} style={{ left: x, top: y, width: 0, height: 0, opacity: clipped ? 0 : away ? 0.3 : dimmed ? 0.3 : faded ? 0.35 : 1, zIndex: dragging ? 30 : selected ? 22 : 18 }}>
       {/* corona */}
       <span
         className="pointer-events-none absolute rounded-full"
@@ -1505,7 +1512,7 @@ function StarNode({
     {/* its name: above the planets (nothing is drawn over it), three lines at most; a name too long for that loses its middle, not its end */}
     <div
       className={cx('pointer-events-none absolute -translate-x-1/2 text-center', close && 'rounded-lg bg-[#05070f]/70 px-2 py-0.5 backdrop-blur-[2px]')}
-      style={{ left: x, top: y + ring + 8, width: close ? 'max-content' : STAR_NAME_W, maxWidth: STAR_NAME_W, opacity: clipped ? 0 : dimmed ? 0.3 : faded ? 0.35 : 1, zIndex: dragging ? 30 : 24 }}
+      style={{ left: x, top: y + ring + 8, width: close ? 'max-content' : STAR_NAME_W, maxWidth: STAR_NAME_W, opacity: clipped ? 0 : away ? 0.3 : dimmed ? 0.3 : faded ? 0.35 : 1, zIndex: dragging ? 30 : 24 }}
     >
       <div title={project.name} className={cx('font-display leading-tight font-semibold [text-shadow:0_0_3px_#000,0_1px_10px_rgba(0,0,0,.95)]', rs >= 30 ? 'text-[15px]' : 'text-[13px]', current ? 'text-white' : 'text-text')}>
         {starNameLines(project.name, rs, measureLabel).map((l, i) => (
@@ -1637,6 +1644,7 @@ function ItemNode({
   label,
   selected,
   dimmed,
+  away = false,
   onClick,
   onHover,
 }: {
@@ -1650,6 +1658,8 @@ function ItemNode({
   label?: OrbitLabel;
   selected: boolean;
   dimmed: boolean;
+  /** Another system's planet while a system is entered: drawn faint, so it does not compete with the system in view. */
+  away?: boolean;
   onClick: () => void;
   onHover?: (on: boolean) => void;
 }) {
@@ -1673,7 +1683,7 @@ function ItemNode({
   return (
     // The pop animation ends at opacity 1 and holds it, so the faintness lives on an inner element.
     <div className="group/planet anim-pop absolute" data-item={it.id} style={{ left: x, top: y, width: 0, height: 0, zIndex: selected ? 26 : 20 }} onPointerEnter={() => onHover?.(true)} onPointerLeave={() => onHover?.(false)}>
-     <div className="absolute top-0 left-0" data-fade style={{ width: 0, height: 0, opacity: dimmed ? 0.22 : it.ghost ? 0.62 : 1 }}>
+     <div className="absolute top-0 left-0" data-fade style={{ width: 0, height: 0, opacity: away && !selected ? AWAY_OPACITY : dimmed ? 0.22 : it.ghost ? 0.62 : 1 }}>
       {selected && <SelectedMark r={r + 9} />}
       <button onClick={onClick} onPointerDown={(e) => e.stopPropagation()} aria-label={`${desc}. Open details.`} title={desc} className="group absolute rounded-full outline-none" style={{ left: -r - 2, top: -r - 2, width: 2 * r + 4, height: 2 * r + 4 }}>
         {it.ring != null && (
@@ -1725,6 +1735,9 @@ function ItemNode({
   );
 }
 
+/** Planets and names of the systems beside the one in view. */
+const AWAY_OPACITY = 0.14;
+
 const PRIORITY_MIX = { 1: 40, 2: 66, 3: 88, 4: 100 } as const;
 
 function PlanetNode({
@@ -1738,9 +1751,11 @@ function PlanetNode({
   label,
   selected,
   dimmed,
+  away = false,
   onClick,
   onHover,
 }: {
+  away?: boolean;
   onHover?: (on: boolean) => void;
   tv: TaskView;
   color: string;
@@ -1783,7 +1798,7 @@ function PlanetNode({
   return (
     // opacity on an inner element: the pop animation holds opacity 1 and would override it here
     <div className="group/planet anim-pop absolute" style={style} onPointerEnter={() => onHover?.(true)} onPointerLeave={() => onHover?.(false)}>
-     <div className="absolute top-0 left-0" data-fade style={{ width: 0, height: 0, opacity: dimmed ? 0.22 : done ? 0.6 : 1 }}>
+     <div className="absolute top-0 left-0" data-fade style={{ width: 0, height: 0, opacity: away && !selected ? AWAY_OPACITY : dimmed ? 0.22 : done ? 0.6 : 1 }}>
       {selected && <SelectedMark r={r + 9} />}
       <button onClick={onClick} onPointerDown={(e) => e.stopPropagation()} aria-label={desc} title={desc} className="group absolute rounded-full outline-none" style={{ left: -r - 2, top: -r - 2, width: 2 * r + 4, height: 2 * r + 4 }}>
         {overdue && <span className="anim-pulse absolute rounded-full" style={{ inset: 3, boxShadow: '0 0 0 2px #f2766b, 0 0 14px 2px rgba(242,118,107,.55)' }} />}
