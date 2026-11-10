@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react';
 import {
+  Ban,
   Check,
   CircleCheck,
   ExternalLink,
@@ -18,7 +19,7 @@ import {
   X,
 } from 'lucide-react';
 import { useOrbit } from '../../store/store';
-import type { Energy, Priority, Task } from '../../types';
+import type { Energy, Priority, Project, Task } from '../../types';
 import { colorHex } from '../../lib/colors';
 import { taskProgress } from '../../lib/scoring';
 import { actualMinutesByTask, sessionsForTask } from '../../store/selectors';
@@ -30,7 +31,7 @@ import { DueBadge, ENERGY_META, PRIORITY_META, PriorityBars, ProjectChip } from 
 import { PlanTodayButton, StartFocusButton, useDraft } from './actions';
 import { KeptBy, LinkedItems } from './HostPanels';
 import { useAbilities } from '../../host/useAbilities';
-import { may, mayWork } from '../../host/caps';
+import { may, mayWork, needsReason } from '../../host/caps';
 
 export function TaskPanel({ id }: { id: string }) {
   const task = useOrbit((s) => s.tasks.find((t) => t.id === id))!;
@@ -41,8 +42,12 @@ export function TaskPanel({ id }: { id: string }) {
   const today = toDateKey(Date.now());
   const up = (patch: Partial<Task>) => updateTask(id, patch);
   const can = useAbilities();
-  // A host's task is edited only where the host allows it (never, in the read-only stage).
+  // A host's task: its own fields are edited where its caps allow; ORBIT's working state for it (estimate,
+  // energy, progress, subtasks, dependencies, links) whenever the host keeps working state.
   const editable = may(can, task.host, 'edit');
+  const work = mayWork(can, task.host);
+  const movable = task.host ? may(can, task.host, 'move') : editable;
+  const hostTargets = useMemo(() => (p: Project) => !!p.host && may(can, p.host, 'create'), [can]);
 
   const title = useDraft(task.title, (v) => v.trim() && up({ title: v.trim() }), 500);
   const notes = useDraft(task.notes, (v) => up({ notes: v }));
@@ -57,8 +62,9 @@ export function TaskPanel({ id }: { id: string }) {
           <span className="truncate">{project?.name}</span>
         </button>
         <div className="flex-1" />
+        {task.host?.pending && <span className="rounded-full bg-surface-3 px-2.5 py-1 text-xs text-muted">Saving to {can.name}…</span>}
         <StatusPill task={task} active={isActive} />
-        {(may(can, task.host, 'delete') || (!task.host && can.personal)) && <TaskMenu task={task} />}
+        {(task.host ? may(can, task.host, 'delete') || may(can, task.host, 'status') : can.personal) && <TaskMenu task={task} />}
         <IconButton label="Close (Esc)" size="sm" onClick={() => select(null)}>
           <X size={18} />
         </IconButton>
@@ -102,66 +108,81 @@ export function TaskPanel({ id }: { id: string }) {
           </dl>
         ) : null}
 
-        {editable && <section className="grid grid-cols-2 gap-x-4 gap-y-4">
-          <Field group label="Priority" className="col-span-2">
-            <Segmented<Priority>
-              label="Priority"
-              value={task.priority}
-              onChange={(priority) => up({ priority })}
-              className="w-full [&>button]:flex-1"
-              options={([1, 2, 3, 4] as Priority[]).map((p) => ({ value: p, label: PRIORITY_META[p].label }))}
-            />
-          </Field>
-          <Field group label="Energy needed" className="col-span-2">
-            <Segmented<Energy>
-              label="Energy needed"
-              value={task.energy}
-              onChange={(energy) => up({ energy })}
-              className="w-full [&>button]:flex-1"
-              options={(['low', 'medium', 'high'] as Energy[]).map((e) => {
-                const M = ENERGY_META[e];
-                return { value: e, label: <><M.Icon size={15} className={M.cls} /> {e[0].toUpperCase() + e.slice(1)}</> };
-              })}
-            />
-          </Field>
-          <Field group label="Estimate">
-            <EstimateInput value={task.estimateMin} onChange={(estimateMin) => up({ estimateMin })} />
-          </Field>
-          <Field group label="Due">
-            <div className="flex gap-1.5">
-              <Input type="date" value={task.due ?? ''} onChange={(e) => up({ due: e.target.value || null })} aria-label="Due date" className="min-w-0" />
-              {task.due && (
-                <IconButton label="Clear due date" size="md" variant="secondary" onClick={() => up({ due: null })}>
-                  <X size={15} />
-                </IconButton>
-              )}
-            </div>
-          </Field>
-          <Field label={task.subtasks.length ? `Progress · from subtasks` : `Progress · ${task.progress}%`} className="col-span-2">
-            {task.subtasks.length ? (
-              <div className="flex items-center gap-3">
-                <div className="h-2 flex-1 overflow-hidden rounded-full bg-surface-3">
-                  <div className="h-full rounded-full bg-teal transition-[width]" style={{ width: `${taskProgress(task)}%` }} />
-                </div>
-                <span className="tabular text-sm text-muted">{taskProgress(task)}%</span>
-              </div>
-            ) : (
-              <input type="range" min={0} max={100} step={5} value={task.progress} onChange={(e) => up({ progress: Number(e.target.value) })} className="w-full" aria-label="Progress" disabled={done} />
+        {(editable || work || movable) && (
+          <section className="grid grid-cols-2 gap-x-4 gap-y-4">
+            {editable && (
+              <Field group label="Priority" className="col-span-2">
+                <Segmented<Priority>
+                  label="Priority"
+                  value={task.priority}
+                  onChange={(priority) => up({ priority })}
+                  className="w-full [&>button]:flex-1"
+                  options={([1, 2, 3, 4] as Priority[]).map((p) => ({ value: p, label: PRIORITY_META[p].label }))}
+                />
+              </Field>
             )}
-          </Field>
-          <Field label="Project" className="col-span-2">
-            <ProjectSelect value={task.projectId} onChange={(projectId) => up({ projectId })} />
-          </Field>
-        </section>}
+            {work && (
+              <Field group label="Energy needed" className="col-span-2">
+                <Segmented<Energy>
+                  label="Energy needed"
+                  value={task.energy}
+                  onChange={(energy) => up({ energy })}
+                  className="w-full [&>button]:flex-1"
+                  options={(['low', 'medium', 'high'] as Energy[]).map((e) => {
+                    const M = ENERGY_META[e];
+                    return { value: e, label: <><M.Icon size={15} className={M.cls} /> {e[0].toUpperCase() + e.slice(1)}</> };
+                  })}
+                />
+              </Field>
+            )}
+            {work && (
+              <Field group label="Estimate">
+                <EstimateInput value={task.estimateMin} onChange={(estimateMin) => up({ estimateMin })} />
+              </Field>
+            )}
+            {editable && (
+              <Field group label="Due">
+                <div className="flex gap-1.5">
+                  <Input type="date" value={task.due ?? ''} onChange={(e) => up({ due: e.target.value || null })} aria-label="Due date" className="min-w-0" />
+                  {task.due && (
+                    <IconButton label="Clear due date" size="md" variant="secondary" onClick={() => up({ due: null })}>
+                      <X size={15} />
+                    </IconButton>
+                  )}
+                </div>
+              </Field>
+            )}
+            {work && (
+              <Field label={task.subtasks.length ? `Progress · from subtasks` : `Progress · ${task.progress}%`} className="col-span-2">
+                {task.subtasks.length ? (
+                  <div className="flex items-center gap-3">
+                    <div className="h-2 flex-1 overflow-hidden rounded-full bg-surface-3">
+                      <div className="h-full rounded-full bg-teal transition-[width]" style={{ width: `${taskProgress(task)}%` }} />
+                    </div>
+                    <span className="tabular text-sm text-muted">{taskProgress(task)}%</span>
+                  </div>
+                ) : (
+                  <input type="range" min={0} max={100} step={5} value={task.progress} onChange={(e) => up({ progress: Number(e.target.value) })} className="w-full" aria-label="Progress" disabled={done} />
+                )}
+              </Field>
+            )}
+            {movable && !task.host?.pending && (
+              <Field label={task.host ? 'System' : 'Project'} className="col-span-2">
+                <ProjectSelect value={task.projectId} onChange={(projectId) => up({ projectId })} only={task.host ? hostTargets : undefined} />
+              </Field>
+            )}
+          </section>
+        )}
 
-        {/* subtasks, dependencies and links are ORBIT's own working state: not for a host's tasks yet */}
-        {!task.host && (
+        {/* subtasks, dependencies and links are ORBIT's own working state */}
+        {work && (
           <>
             <Subtasks task={task} />
             <Dependencies task={task} />
             <Links task={task} />
           </>
         )}
+        {task.host && work && <p className="-mt-3 text-xs text-faint">Estimate, energy, progress, subtasks, dependencies and links stay on this computer, with ORBIT; {can.name} does not see them.</p>}
 
         {editable ? (
           <section>
@@ -195,8 +216,67 @@ function StatusPill({ task, active }: { task: Task; active: boolean }) {
 function TaskMenu({ task }: { task: Task }) {
   const confirm = useOrbit((s) => s.confirm);
   const deleteTask = useOrbit((s) => s.deleteTask);
+  const dropTask = useOrbit((s) => s.dropTask);
   const createTask = useOrbit((s) => s.createTask);
   const select = useOrbit((s) => s.select);
+  const can = useAbilities();
+  const ref = task.host;
+  const items: Parameters<typeof Menu>[0]['items'] = [];
+  if (!ref)
+    items.push(
+      {
+        label: 'Duplicate',
+        icon: <Plus size={15} />,
+        onSelect: () => {
+          const { id: _id, createdAt: _c, updatedAt: _u, status: _s, completedAt: _ca, parkedAt: _pa, ...rest } = task;
+          const t = createTask({ ...rest, title: `${task.title} (copy)`, subtasks: task.subtasks.map((s) => ({ ...s, id: uid(), done: false })) });
+          select({ type: 'task', id: t.id });
+        },
+      },
+      'sep',
+    );
+  // A host's task can be dropped: done without being done (the host keeps it, struck through).
+  if (ref && task.status !== 'done' && may(can, ref, 'status') && !ref.pending)
+    items.push({
+      label: 'Drop task…',
+      icon: <Ban size={15} />,
+      onSelect: () =>
+        needsReason(ref, 'drop')
+          ? confirm({
+              title: 'Drop this task?',
+              body: `“${task.title}” stays in ${can.name}, marked dropped. ${can.name} asks why.`,
+              confirmLabel: 'Drop task',
+              reason: { label: 'Reason', placeholder: `Sent to ${can.name}`, required: true },
+              onConfirm: (reason) => dropTask(task.id, reason),
+            })
+          : dropTask(task.id),
+    });
+  if (!ref || may(can, ref, 'delete'))
+    items.push({
+      label: 'Delete task',
+      icon: <Trash2 size={15} />,
+      danger: true,
+      onSelect: () =>
+        confirm(
+          ref
+            ? {
+                title: 'Delete this task?',
+                body: `This asks ${can.name} to delete “${task.title}”. Once it has, ORBIT removes its checkpoints and its place on any day plan.`,
+                confirmLabel: 'Delete task',
+                danger: true,
+                reason: needsReason(ref, 'delete') ? { label: 'Reason', placeholder: `Sent to ${can.name}`, required: true } : undefined,
+                onConfirm: (reason) => deleteTask(task.id, reason),
+              }
+            : {
+                title: 'Delete this task?',
+                body: `“${task.title}”, its checkpoints and its place on any day plan will be removed. Focus history stays in Insights.`,
+                confirmLabel: 'Delete task',
+                danger: true,
+                onConfirm: () => deleteTask(task.id),
+              },
+        ),
+    });
+  if (!items.length) return null;
   return (
     <Menu
       label="Task actions"
@@ -205,31 +285,7 @@ function TaskMenu({ task }: { task: Task }) {
           <MoreHorizontal size={18} />
         </IconButton>
       )}
-      items={[
-        {
-          label: 'Duplicate',
-          icon: <Plus size={15} />,
-          onSelect: () => {
-            const { id: _id, createdAt: _c, updatedAt: _u, status: _s, completedAt: _ca, parkedAt: _pa, ...rest } = task;
-            const t = createTask({ ...rest, title: `${task.title} (copy)`, subtasks: task.subtasks.map((s) => ({ ...s, id: uid(), done: false })) });
-            select({ type: 'task', id: t.id });
-          },
-        },
-        'sep',
-        {
-          label: 'Delete task',
-          icon: <Trash2 size={15} />,
-          danger: true,
-          onSelect: () =>
-            confirm({
-              title: 'Delete this task?',
-              body: `“${task.title}”, its checkpoints and its place on any day plan will be removed. Focus history stays in Insights.`,
-              confirmLabel: 'Delete task',
-              danger: true,
-              onConfirm: () => deleteTask(task.id),
-            }),
-        },
-      ]}
+      items={items}
     />
   );
 }
@@ -358,8 +414,9 @@ function EstimateInput({ value, onChange }: { value: number | null; onChange: (v
   );
 }
 
-export function ProjectSelect({ value, onChange }: { value: string; onChange: (id: string) => void }) {
-  const projects = useOrbit((s) => s.projects);
+export function ProjectSelect({ value, onChange, only }: { value: string; onChange: (id: string) => void; only?: (p: Project) => boolean }) {
+  const all = useOrbit((s) => s.projects);
+  const projects = useMemo(() => (only ? all.filter((p) => p.id === value || only(p)) : all), [all, only, value]);
   return (
     <Select value={value} onChange={(e) => onChange(e.target.value)} aria-label="Project">
       {projects.map((p) => (

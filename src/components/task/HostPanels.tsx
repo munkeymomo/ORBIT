@@ -1,19 +1,21 @@
 import { useMemo, useState } from 'react';
-import { ExternalLink, X } from 'lucide-react';
+import { ExternalLink, Link2, Plus, X } from 'lucide-react';
 import { useOrbit } from '../../store/store';
 import type { HostRef, Task } from '../../types';
 import type { Attachment, Beacon, Collection, Family } from '../../host/types';
 import { useAbilities } from '../../host/useAbilities';
+import { may } from '../../host/caps';
 import { CLUTTER } from '../universe/space';
 import { colorHex } from '../../lib/colors';
 import { projectStats } from '../../store/selectors';
 import { daysBetween, friendlyDay, toDateKey } from '../../lib/util';
-import { Button, IconButton, SectionTitle, cx } from '../ui/primitives';
+import { Button, IconButton, Input, Menu, SectionTitle, cx } from '../ui/primitives';
 import { DueBadge, PriorityBars, ProgressRing, ProjectChip } from '../ui/visuals';
 
 /*
- * Panels for records a host owns. Read-only in this stage: they show what the host sent and offer to open it
- * in the host; nothing here edits a host record.
+ * Panels for records a host owns. They show what the host sent and offer to open it in the host. What can be
+ * changed from here is what the record's caps allow: new tasks in a system (create), and taking linked items
+ * off a task (attach) or linking more through the host's own picker. Everything else is the host's.
  */
 
 /** Where a record is kept, and a way there. */
@@ -44,7 +46,7 @@ function StateBadge({ a }: { a: Attachment }) {
 }
 
 /** One attachment (a moon, or an item in a belt) as a row. */
-export function AttachmentRow({ a, families }: { a: Attachment; families: Record<string, Family> }) {
+export function AttachmentRow({ a, families, onDetach }: { a: Attachment; families: Record<string, Family>; onDetach?: () => void }) {
   const openInHost = useOrbit((s) => s.openInHost);
   return (
     <li className="flex items-center gap-2.5 rounded-lg px-2 py-1.5 hover:bg-surface-2">
@@ -59,6 +61,11 @@ export function AttachmentRow({ a, families }: { a: Attachment; families: Record
           <ExternalLink size={13} />
         </IconButton>
       )}
+      {onDetach && (
+        <IconButton label={`Take ${a.label} off this task`} size="xs" onClick={onDetach}>
+          <X size={13} />
+        </IconButton>
+      )}
     </li>
   );
 }
@@ -67,17 +74,54 @@ export function AttachmentRow({ a, families }: { a: Attachment; families: Record
 export function LinkedItems({ taskId }: { taskId: string }) {
   const set = useOrbit((s) => s.host?.attachments[taskId]);
   const families = useOrbit((s) => s.host?.families ?? {});
+  const pickable = useOrbit((s) => s.host?.info.caps.pick);
+  const ref = useOrbit((s) => s.tasks.find((t) => t.id === taskId)?.host);
+  const { detachLinked, pickLinked } = useOrbit.getActions();
   const can = useAbilities();
-  if (!set || (!set.items.length && !set.more)) return null;
+  const attach = !!ref && !ref.pending && may(can, ref, 'attach');
+  const offer = attach ? (pickable ?? []) : [];
+  const empty = !set || (!set.items.length && !set.more);
+  if (empty && !offer.length) return null;
+  const label = (f: string) => families[f]?.label ?? f;
+  const pick = (f: string) => void pickLinked(f, { planet: taskId });
   return (
     <section>
-      <SectionTitle right={<span className="tabular text-xs text-muted">{set.items.length + set.more}</span>}>Linked items</SectionTitle>
-      <ul className="space-y-0.5">
-        {set.items.map((a) => (
-          <AttachmentRow key={a.id} a={a} families={families} />
-        ))}
-      </ul>
-      {set.more > 0 && <p className="mt-1.5 px-2 text-xs text-muted">+{set.more} more in {can.name}</p>}
+      <SectionTitle
+        right={
+          <span className="flex items-center gap-2">
+            {!empty && <span className="tabular text-xs text-muted">{set!.items.length + set!.more}</span>}
+            {offer.length === 1 && (
+              <Button size="sm" variant="ghost" icon={<Link2 size={14} />} onClick={() => pick(offer[0])}>
+                Link {label(offer[0]).toLowerCase()}…
+              </Button>
+            )}
+            {offer.length > 1 && (
+              <Menu
+                label="Link an item"
+                align="right"
+                trigger={(p) => (
+                  <Button {...p} size="sm" variant="ghost" icon={<Link2 size={14} />}>
+                    Link…
+                  </Button>
+                )}
+                items={offer.map((f) => ({ label: label(f), icon: <span className="h-2.5 w-2.5 rounded-full" style={{ background: families[f]?.color ?? '#9aa3b8' }} />, onSelect: () => pick(f) }))}
+              />
+            )}
+          </span>
+        }
+      >
+        Linked items
+      </SectionTitle>
+      {empty ? (
+        <p className="px-2 text-sm text-muted">Nothing linked yet; {can.name} shows its own picker.</p>
+      ) : (
+        <ul className="space-y-0.5">
+          {set!.items.map((a) => (
+            <AttachmentRow key={a.id} a={a} families={families} onDetach={attach && a.link ? () => detachLinked(taskId, a.id) : undefined} />
+          ))}
+        </ul>
+      )}
+      {!empty && set!.more > 0 && <p className="mt-1.5 px-2 text-xs text-muted">+{set!.more} more in {can.name}</p>}
     </section>
   );
 }
@@ -231,6 +275,28 @@ function TaskRows({ tasks, today }: { tasks: Task[]; today: string }) {
   );
 }
 
+/** A new task in a host's system: shown at once, and created by the host (see the store's createTask). */
+function NewHostTask({ systemId }: { systemId: string }) {
+  const createTask = useOrbit((s) => s.createTask);
+  const [title, setTitle] = useState('');
+  return (
+    <form
+      className="mb-2 flex gap-2"
+      onSubmit={(e) => {
+        e.preventDefault();
+        if (!title.trim()) return;
+        createTask({ projectId: systemId, title: title.trim() });
+        setTitle('');
+      }}
+    >
+      <Input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="New task" aria-label="New task title" className="h-9" />
+      <IconButton label="New task" type="submit" variant="secondary" size="sm" className="!h-9 !w-9" disabled={!title.trim()}>
+        <Plus size={16} />
+      </IconButton>
+    </form>
+  );
+}
+
 /** A system a host owns. */
 export function HostSystemPanel({ id }: { id: string }) {
   const project = useOrbit((s) => s.projects.find((p) => p.id === id))!;
@@ -250,6 +316,7 @@ export function HostSystemPanel({ id }: { id: string }) {
   const mine = useMemo(() => (beacons ?? []).filter((b) => b.system === id), [beacons, id]);
   const visible = showDone ? own : own.filter((t) => t.status !== 'done');
   const busy = stats.open > CLUTTER.tasks;
+  const canCreate = may(can, ref, 'create');
   const LIST_MAX = 60;
 
   return (
@@ -313,6 +380,7 @@ export function HostSystemPanel({ id }: { id: string }) {
           >
             Tasks
           </SectionTitle>
+          {canCreate && <NewHostTask systemId={id} />}
           {visible.length === 0 && <p className="py-3 text-center text-sm text-muted">{own.length ? 'All done here.' : 'No tasks.'}</p>}
           <TaskRows tasks={visible.slice(0, LIST_MAX)} today={today} />
           {visible.length > LIST_MAX && <p className="mt-1.5 px-2.5 text-xs text-muted">and {visible.length - LIST_MAX} more; search finds any of them.</p>}
