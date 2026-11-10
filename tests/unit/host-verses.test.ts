@@ -70,7 +70,7 @@ import { adaptVerse, itemDiameter, ITEM_DIAMETER } from '../../src/host/adapt';
 import { offeredVerses, resolveLanding, startVerse, workVerseOf, verseSwitch } from '../../src/host/verses';
 import { buildModel, itemSystemRadius, projectRadius } from '../../src/components/universe/model';
 import { buildSpace, CLUTTER, LOD } from '../../src/components/universe/space';
-import { arrowCurves, planetSpots } from '../../src/components/universe/arrows';
+import { arrowCurves, crossesStar, curveLabelPoint, planetSpots, starBoxes, type Spot, type StarBox } from '../../src/components/universe/arrows';
 import { placeGalaxyLabels } from '../../src/components/universe/galaxyLabels';
 import { overlaps } from '../../src/components/universe/labels';
 import { abilities } from '../../src/host/caps';
@@ -307,6 +307,62 @@ describe('arrows', () => {
     expect(arrowCurves(a.extras.arrows, planetSpots(galaxies, view, true))).toEqual([]);
     // only those in view, with a size
     expect(arrowCurves(a.extras.arrows, planetSpots(galaxies, { x: 1e6, y: 1e6, k: 1 }, false, { w: 800, h: 600 }))).toEqual([]);
+  });
+  describe('routing round a system\'s star', () => {
+    // a star at (200, 200) with its name under it; planets on an orbit of radius 100
+    const star: StarBox = { x: 200, y: 200, r: 40, name: { x: 150, y: 250, w: 100, h: 40 }, reach: 110, system: 's' };
+    const spot = (x: number, y: number): Spot => ({ x, y, r: 15, galaxy: 'g', system: 's' });
+    const mid = (c: { ax: number; ay: number; bx: number; by: number; cx: number; cy: number }) => ({ x: 0.25 * c.ax + 0.5 * c.cx + 0.25 * c.bx, y: 0.25 * c.ay + 0.5 * c.cy + 0.25 * c.by });
+    it('a chord through the centre bows out past the orbit, away from the name, and says it detours', () => {
+      const spots = new Map([['a', spot(200, 100)], ['b', spot(200, 300)], ['c', spot(100, 200)], ['d', spot(300, 200)]]);
+      const stars = new Map([['s', star]]);
+      expect(crossesStar(spots.get('a')!, spots.get('b')!, star)).toBe(true);
+      const [vert] = arrowCurves([{ from: 'a', to: 'b', label: 'x' }], spots, stars);
+      expect(vert.detour).toBe(true);
+      const m = mid(vert);
+      expect(Math.hypot(m.x - star.x, m.y - star.y)).toBeGreaterThanOrEqual(star.reach + 20);
+      // the name is below the star: the bow is not
+      const [horiz] = arrowCurves([{ from: 'c', to: 'd' }], spots, stars);
+      expect(horiz.detour).toBe(true);
+      expect(mid(horiz).y).toBeLessThan(star.y - star.reach);
+      // without the star known, the old straight-ish curve
+      expect(arrowCurves([{ from: 'a', to: 'b' }], spots)[0].detour).toBeFalsy();
+    });
+    it('the label sits mid-curve, moved along it when that spot is on a star or its name', () => {
+      const c = { from: 'a', to: 'b', ax: 100, ay: 300, bx: 300, by: 300, cx: 200, cy: 300 };
+      expect(curveLabelPoint(c)).toEqual({ x: 200, y: 300 });
+      // a name box right under the middle
+      const stars = new Map([['s', { ...star, x: 200, y: 100, r: 10, name: { x: 190, y: 280, w: 20, h: 40 } }]]);
+      const p = curveLabelPoint(c, stars);
+      expect(p.x).not.toBe(200);
+      expect(Math.abs(p.x - 200)).toBeGreaterThan(50);
+    });
+    it('takes the side with fewer planets in the way', () => {
+      // a vertical chord through the star; a planet sits on the upper right of the orbit, none on the left
+      const spots = new Map([['a', spot(200, 100)], ['b', spot(200, 300)], ['p', spot(285, 160)]]);
+      const [c] = arrowCurves([{ from: 'a', to: 'b' }], spots, new Map([['s', star]]));
+      expect(c.detour).toBe(true);
+      expect(mid(c).x).toBeLessThan(star.x);
+    });
+    it('a short neighbour chord stays (nearly) straight', () => {
+      const spots = new Map([['a', spot(200, 100)], ['b', spot(287, 150)]]);
+      const [c] = arrowCurves([{ from: 'a', to: 'b' }], spots, new Map([['s', star]]));
+      expect(c.detour).toBeFalsy();
+      const d = Math.hypot(87, 50);
+      const m = mid(c);
+      // how far the curve's middle strays from the line between the two planets
+      const off = Math.abs((m.x - 200) * (150 - 100) - (m.y - 100) * (287 - 200)) / d;
+      expect(off).toBeLessThanOrEqual(d * 0.1);
+    });
+    it('star boxes come from the laid-out sky', async () => {
+      const { a, galaxies } = await laid();
+      const boxes = starBoxes(galaxies, view, (t) => t.length * 6);
+      const spots = planetSpots(galaxies, view, false);
+      const out = arrowCurves(a.extras.arrows, spots, boxes);
+      // fed-with: the starter is opposite the flour, across the Pantry's star
+      const fed = out.find((c) => c.from === 'i-starter' && c.to === 'i-flour');
+      expect(fed?.detour).toBe(true);
+    });
   });
   it('never make a task blocked, and never touch dependencies', async () => {
     const h = await hosted();

@@ -7,7 +7,7 @@ import type { Beacon, Cluster, Family } from '../../host/types';
 import type { MoonSet } from '../../host/adapt';
 import type { Prefs } from '../../types';
 import type { LabelSide, OrbitLabel } from './labels';
-import { curveMid, type ArrowCurve } from './arrows';
+import type { ArrowCurve } from './arrows';
 
 /** Fixed space palette: the Universe is always night sky, in either app theme. */
 const SPACE = {
@@ -443,42 +443,38 @@ const FONT = 'Inter Variable, system-ui, sans-serif';
 export const PORTAL = '#b18cff';
 const ARROW = '#8fd8ff';
 
-/** Relations between planets: a thin curve with an open chevron at its end; its label when an end is in focus. */
+/**
+ * Relations between planets: a thin curve from the first to the second, a dot where it leaves and a filled arrowhead
+ * where it arrives. Its label is not drawn here: an HTML chip above everything draws it (`ArrowLabels` in Canvas).
+ */
 function drawArrows(g: CanvasRenderingContext2D, arrows: ArrowCurve[], focus?: Set<string>) {
   g.save();
   g.setLineDash([]);
   for (const c of arrows) {
     const on = !!focus && (focus.has(c.from) || focus.has(c.to));
-    g.strokeStyle = rgba(ARROW, on ? 0.95 : 0.5);
+    const col = rgba(ARROW, on ? 0.95 : 0.55);
+    g.strokeStyle = col;
+    g.fillStyle = col;
     g.lineWidth = on ? 1.8 : 1.2;
     g.beginPath();
     g.moveTo(c.ax, c.ay);
     g.quadraticCurveTo(c.cx, c.cy, c.bx, c.by);
     g.stroke();
-    // an open chevron along the curve's end direction
-    const a = Math.atan2(c.by - c.cy, c.bx - c.cx);
+    // where it leaves
     g.beginPath();
-    g.moveTo(c.bx - Math.cos(a - 0.5) * 8, c.by - Math.sin(a - 0.5) * 8);
-    g.lineTo(c.bx, c.by);
-    g.lineTo(c.bx - Math.cos(a + 0.5) * 8, c.by - Math.sin(a + 0.5) * 8);
-    g.stroke();
+    g.arc(c.ax, c.ay, on ? 2.6 : 2, 0, Math.PI * 2);
+    g.fill();
+    // a filled arrowhead along the curve's end direction: the arrow points at the `to` planet
+    const a = Math.atan2(c.by - c.cy, c.bx - c.cx);
+    const L = on ? 11 : 9;
+    g.beginPath();
+    g.moveTo(c.bx, c.by);
+    g.lineTo(c.bx - Math.cos(a - 0.4) * L, c.by - Math.sin(a - 0.4) * L);
+    g.lineTo(c.bx - Math.cos(a + 0.4) * L, c.by - Math.sin(a + 0.4) * L);
+    g.closePath();
+    g.fill();
   }
   g.restore();
-  for (const c of arrows) {
-    if (!c.label || !focus || !(focus.has(c.from) || focus.has(c.to))) continue;
-    const m = curveMid(c);
-    g.save();
-    g.font = `600 11px ${FONT}`;
-    const w = g.measureText(c.label).width + 12;
-    g.fillStyle = 'rgba(8,12,24,0.9)';
-    g.strokeStyle = rgba(ARROW, 0.6);
-    g.lineWidth = 1;
-    roundRect(g, m.x - w / 2, m.y - 9, w, 18, 9);
-    g.fill();
-    g.stroke();
-    g.restore();
-    text(g, c.label, m.x, m.y, { color: '#d6f1ff', size: 11, weight: 600, align: 'center' });
-  }
 }
 const famColor = (families: Record<string, Family>, id: string) => families[id]?.color ?? '#c9d2ee';
 const famLabel = (families: Record<string, Family>, id: string) => families[id]?.label ?? id;

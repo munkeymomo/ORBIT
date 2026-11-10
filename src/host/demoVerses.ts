@@ -186,6 +186,7 @@ function thingsVerse(): Verse {
     { from: 'i-bed', to: 'i-gd-larch', label: 'made from' },
     { from: 'i-compost', to: 'i-clippings', label: 'made from' },
     { from: 'i-starter', to: 'i-rye', label: 'made from' },
+    { from: 'i-starter', to: 'i-flour', label: 'fed with' },
   ];
 
   return {

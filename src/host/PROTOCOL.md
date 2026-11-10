@@ -237,8 +237,8 @@ than 40 items in one system are drawn as a ring of dots (family colours) with a 
 ## Arrows
 
 `verse.arrows` (`{from, to, label?}` between planet ids of the same verse, tasks or items) are relations such as
-"made from". ORBIT draws each as a thin solid curve with an open arrowhead, between two planets drawn one by one
-(close up), in systems of the same galaxy; the `label` shows when either end is selected or hovered. An arrow
+"made from". ORBIT draws each as a thin solid curve from `from` (a small dot) to `to` (a filled arrowhead), between two planets drawn one by one
+(close up), in systems of the same galaxy. A curve that would cross a system's star or its name bows out around it, past the planets' orbit. The `label` shows, on a chip above everything reading "<from title> <label> → <to title>", when either end is selected or hovered. An arrow
 whose end is missing or not drawn is skipped. Arrows are never dependencies: they never use the padlock or the
 dashed "blocked" lines, and never change what Next suggests or what counts as blocked.
 

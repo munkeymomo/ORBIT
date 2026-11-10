@@ -13,7 +13,7 @@ import { useAbilities } from '../../host/useAbilities';
 import type { MoonSet } from '../../host/adapt';
 import type { Also, Arrow, Beacon, Family } from '../../host/types';
 import { verseSwitch } from '../../host/verses';
-import { arrowCurves, planetSpots } from './arrows';
+import { arrowCurves, curveLabelPoint, planetSpots, starBoxes } from './arrows';
 import { VerseBar } from './VerseBar';
 import { useOfferedVerses, WormholeMark, wormholeText } from '../host/Wormholes';
 import { placeGalaxyLabels } from './galaxyLabels';
@@ -719,7 +719,16 @@ export function UniverseCanvas({ onNewSystem, onNewGalaxy }: { onNewSystem: (gal
     [galaxies, view, size, level, selectedPlanet, today, layers.beacons, ui],
   );
   // a verse's relations ("made from"): drawn when both planets are, with labels for the selected or hovered one
-  const curves = useMemo(() => (view && arrowList.length ? arrowCurves(arrowList, planetSpots(galaxies, view, level === 'universe', size)) : []), [arrowList, galaxies, view, level, size]);
+  const arrowStars = useMemo(() => (view && arrowList.length ? starBoxes(galaxies, view, measureLabel) : undefined), [arrowList, galaxies, view]);
+  const curves = useMemo(() => (view && arrowList.length ? arrowCurves(arrowList, planetSpots(galaxies, view, level === 'universe', size), arrowStars) : []), [arrowList, galaxies, view, level, size, arrowStars]);
+  const planetTitles = useMemo(() => {
+    const m = new Map<string, string>();
+    for (const g of galaxies) for (const sy of g.systems) {
+      for (const tv of sy.pv.tasks) m.set(tv.task.id, tv.task.title);
+      for (const iv of sy.pv.items ?? []) m.set(iv.item.id, iv.item.title);
+    }
+    return m;
+  }, [galaxies]);
   const arrowFocus = useMemo(() => new Set([selectedPlanet, hovered].filter((x): x is string => !!x)), [selectedPlanet, hovered]);
   // the whole universe: galaxies' names and counts never cover each other
   const galaxyLabels = useMemo(
@@ -780,6 +789,27 @@ export function UniverseCanvas({ onNewSystem, onNewGalaxy }: { onNewSystem: (gal
         )}
 
         <canvas ref={fade} className="pointer-events-none absolute inset-0 z-[5] h-full w-full" style={{ opacity: 0 }} aria-hidden />
+
+        {/* what a relation says, on a backing above stars, names and planets; only for the selected or hovered planet's arrows */}
+        {view &&
+          nudgeApart(
+            curves.filter((c) => c.label && (arrowFocus.has(c.from) || arrowFocus.has(c.to))).map((c) => ({ c, ...curveLabelPoint(c, arrowStars, Math.min(300, measureLabel(`${planetTitles.get(c.from) ?? ''}  ${c.label}  →  ${planetTitles.get(c.to) ?? ''}`) + 24) / 2) })),
+            24,
+          ).map(({ c, ...m }) => {
+              return (
+                <div
+                  key={`al-${c.from}-${c.to}`}
+                  data-arrow-label={`${c.from}>${c.to}`}
+                  className="pointer-events-none absolute z-[45] flex max-w-[300px] -translate-x-1/2 -translate-y-1/2 items-center gap-1.5 rounded-full border border-[#8fd8ff]/60 bg-[#060914]/95 px-2.5 py-0.5 text-[11.5px] whitespace-nowrap shadow-panel"
+                  style={{ left: m.x, top: m.y }}
+                >
+                  <span className="min-w-0 truncate text-muted">{planetTitles.get(c.from) ?? ''}</span>
+                  <span className="font-semibold text-[#d6f1ff]">{c.label}</span>
+                  <span aria-hidden className="text-[#8fd8ff]">→</span>
+                  <span className="min-w-0 truncate text-muted">{planetTitles.get(c.to) ?? ''}</span>
+                </div>
+              );
+            })}
 
         {view &&
           galaxies.map((g) => {
@@ -1180,6 +1210,17 @@ export function UniverseCanvas({ onNewSystem, onNewGalaxy }: { onNewSystem: (gal
 }
 
 /* ================= pieces ================= */
+
+/** Chips at (x, y) that would sit on top of each other are moved down, one under the next. */
+function nudgeApart<T extends { x: number; y: number }>(chips: T[], h: number, w = 300): T[] {
+  const placed: T[] = [];
+  for (const c of [...chips].sort((a, b) => a.y - b.y)) {
+    let y = c.y;
+    while (placed.some((p) => Math.abs(p.y - y) < h && Math.abs(p.x - c.x) < w)) y += h;
+    placed.push({ ...c, y });
+  }
+  return placed;
+}
 
 function Breadcrumbs({ ctx, galaxies, onFly, onUp, compact = false }: { ctx: { galaxy: GalaxyPlace | null; system: SystemPlace | null }; galaxies: GalaxyPlace[]; onFly: (t: Target) => void; onUp: () => void; compact?: boolean }) {
   const crumb = cx('inline-flex h-8 min-w-0 items-center gap-1.5 rounded-lg px-2.5 text-[13px] font-medium transition-colors hover:bg-surface-3', compact ? 'max-w-[150px]' : 'max-w-[200px]');
