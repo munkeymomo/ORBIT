@@ -1127,7 +1127,7 @@ export function UniverseCanvas({ onNewSystem, onNewGalaxy }: { onNewSystem: (gal
             <IconButton label="What the shapes mean" variant="secondary" active={legend} onClick={() => setLegend((l) => !l)} className="bg-surface/80 backdrop-blur-xl">
               <CircleHelp size={18} />
             </IconButton>
-            {legend && <Legend onClose={() => setLegend(false)} hosted={can.hosted} hostName={can.name} verseLegend={verses.size > 1 ? verses.get(host?.shown ?? '')?.legend : undefined} />}
+            {legend && <Legend onClose={() => setLegend(false)} hosted={can.hosted} hostName={can.name} verseLegend={verses.size > 1 ? verses.get(host?.shown ?? '')?.legend : undefined} recordsOnly={can.hosted && verses.size > 1 && !!host && host.shown !== host.verseId && verses.get(host.shown)?.editable === false} />}
           </div>
           {!can.personal && !sky && (
             <IconButton label="Tidy galaxies into a spiral" variant="secondary" onClick={() => useOrbit.getActions().arrangeGalaxiesSpiral()} disabled={galaxies.length < 2} className="bg-surface/80 backdrop-blur-xl">
@@ -1971,12 +1971,33 @@ function Minimap({ galaxies, view, size, W, H, onFly, onPan }: { galaxies: Galax
   );
 }
 
-function Legend({ onClose, hosted = false, hostName = '', verseLegend }: { onClose: () => void; hosted?: boolean; hostName?: string; verseLegend?: string }) {
+/**
+ * `recordsOnly`: a verse that is not editable (and not the work verse) shows records, never tasks, so only what is true
+ * for records is listed; the verse's own sentence says what size, colour and ring mean there.
+ */
+function Legend({ onClose, hosted = false, hostName = '', verseLegend, recordsOnly = false }: { onClose: () => void; hosted?: boolean; hostName?: string; verseLegend?: string; recordsOnly?: boolean }) {
   const Row = ({ icon, children }: { icon: React.ReactNode; children: React.ReactNode }) => (
     <li className="flex items-center gap-3">
       <span className="flex w-8 shrink-0 justify-center">{icon}</span>
       <span>{children}</span>
     </li>
+  );
+  const hostRows = (
+    <>
+      <Row icon={<span className="h-5 w-5 rounded-full border border-dashed border-white/60" />}>Dashed ring with ticks: a galaxy kept by {hostName}. Its chip says what it is.</Row>
+      {!recordsOnly && <Row icon={<span className="h-5 w-5 rounded-full border border-white/60" />}>Thin solid rim, “Yours” chip: a galaxy of your own, kept with ORBIT.</Row>}
+      <Row icon={<span className="flex gap-0.5"><span className="h-2 w-2 rounded-full bg-[#f5b544]" /><span className="h-2 w-2 rounded-full border border-[#4fa3f0]" /></span>}>
+        {recordsOnly ? 'Moons: what a record holds or refers to.' : 'Moons: what a task uses.'} Hollow: archived; struck: gone; red: changed since.
+      </Row>
+      <Row icon={<span className="h-3 w-5 rounded-full border-y-2 border-dotted border-white/50" />}>{recordsOnly ? 'Belt: what a system holds that nothing here uses.' : 'Belt: what a system holds that no task uses.'} Many: a haze with a count.</Row>
+      <Row icon={<span className="h-2.5 w-2.5 rotate-45 border-[1.6px] border-white" />}>Diamond: a date. White planned, amber soon, red late, teal achieved, grey rescoped.</Row>
+      <Row icon={<span className="flex gap-1"><span className="h-4 w-4 rounded-full bg-[#5ad1c8]" /><span className="h-4 w-4 rounded-full border-2 border-[#5ad1c8]" /></span>}>
+        {recordsOnly ? 'Planet: a record, coloured by its kind.' : 'Coloured by kind: a record, not a task.'} Hollow: archived; struck: gone; dashed and faint: lives elsewhere.
+      </Row>
+      {recordsOnly && <Row icon={<span className="h-5 w-5 rounded-full border-2 border-white/10" style={{ borderTopColor: 'rgba(255,255,255,.85)', borderRightColor: 'rgba(255,255,255,.85)' }} />}>White ring: a share, as the line above says.</Row>}
+      <Row icon={<span className="h-0.5 w-6 rounded bg-[#8fd8ff]" />}>Thin blue arrow: a relation between two records (e.g. “made from”), drawn from the first to the second. Never a block.</Row>
+      <Row icon={<WormholeMark size={18} className="text-[#c9b3ff]" />}>Violet swirl: a portal or a wormhole to the same thing in another view.</Row>
+    </>
   );
   return (
     <div data-ui className="anim-pop absolute top-12 right-0 z-30 w-[340px] rounded-2xl border border-line-strong bg-raised p-4 text-[13px] leading-snug shadow-panel">
@@ -1987,31 +2008,30 @@ function Legend({ onClose, hosted = false, hostName = '', verseLegend }: { onClo
         </IconButton>
       </div>
       {verseLegend && <p className="mb-3 rounded-xl border border-[#b18cff]/40 bg-[#b18cff]/10 px-3 py-2 text-[12.5px] text-text">In this view: {verseLegend}</p>}
-      <ul className="space-y-2.5 text-muted">
-        <Row icon={<span className="h-5 w-5 rounded-full bg-[radial-gradient(circle,#fff_0%,#8b7cf6_35%,transparent_70%)]" />}>Galaxy: a group of projects. Denser spiral = more open work.</Row>
-        <Row icon={<span className="h-5 w-5 rounded-full border-[3px] border-accent bg-[radial-gradient(circle_at_40%_36%,#fff,#8b7cf6)]" style={{ borderRightColor: 'rgba(255,255,255,.15)', borderBottomColor: 'rgba(255,255,255,.15)' }} />}>
-          Star: a project. Ring = share of estimated work done. Bigger star = more open work.
-        </Row>
-        <Row icon={<span className="flex items-end gap-1"><span className="h-3 w-3 rounded-full bg-[radial-gradient(circle_at_35%_30%,#fff,#8b7cf6_40%,#2a2350)]" /><span className="h-5 w-5 rounded-full bg-[radial-gradient(circle_at_35%_30%,#fff,#8b7cf6_40%,#2a2350)]" /></span>}>Planet: a task. Size = estimated effort.</Row>
-        <Row icon={<span className="flex gap-1"><span className="h-4 w-4 rounded-full bg-[#7b7f93]" /><span className="h-4 w-4 rounded-full bg-[#8b7cf6]" /></span>}>Colour strength: priority, from grey (low) to vivid (critical).</Row>
-        <Row icon={<span className="flex gap-1"><span className="h-4 w-4 rounded-full shadow-[0_0_0_2px_#f2766b]" /><span className="h-4 w-4 rounded-full shadow-[0_0_0_2px_#f5b544]" /></span>}>Red glow: overdue. Amber glow: due today or tomorrow.</Row>
-        <Row icon={<span className="h-5 w-5 rounded-full border-[3px] border-[#2dd4bf]" style={{ borderLeftColor: 'transparent', borderBottomColor: 'transparent' }} />}>Teal arc: progress on the task.</Row>
-        <Row icon={<span className="h-4 w-4 rounded-full bg-[#2dd4bf] shadow-[0_0_12px_#2dd4bf]" />}>Teal glow: in focus right now.</Row>
-        <Row icon={<Pause size={16} className="text-text" />}>Parked, place saved (amber dashed orbit).</Row>
-        <Row icon={<Lock size={15} className="text-text" />}>Waiting on another task; dashed arrows show what blocks what.</Row>
-        {hosted && (
-          <>
-            <Row icon={<span className="h-5 w-5 rounded-full border border-dashed border-white/60" />}>Dashed ring with ticks: a galaxy kept by {hostName}. Its chip says what it is.</Row>
-            <Row icon={<span className="h-5 w-5 rounded-full border border-white/60" />}>Thin solid rim, “Yours” chip: a galaxy of your own, kept with ORBIT.</Row>
-            <Row icon={<span className="flex gap-0.5"><span className="h-2 w-2 rounded-full bg-[#f5b544]" /><span className="h-2 w-2 rounded-full border border-[#4fa3f0]" /></span>}>Moons: what a task uses. Hollow: archived; struck: gone; red: changed since.</Row>
-            <Row icon={<span className="h-3 w-5 rounded-full border-y-2 border-dotted border-white/50" />}>Belt: what a system holds that no task uses. Many: a haze with a count.</Row>
-            <Row icon={<span className="h-2.5 w-2.5 rotate-45 border-[1.6px] border-white" />}>Diamond: a date. White planned, amber soon, red late, teal achieved, grey rescoped.</Row>
-            <Row icon={<span className="flex gap-1"><span className="h-4 w-4 rounded-full bg-[#5ad1c8]" /><span className="h-4 w-4 rounded-full border-2 border-[#5ad1c8]" /></span>}>Coloured by kind: a record, not a task. Hollow: archived; struck: gone; dashed and faint: lives elsewhere.</Row>
-            <Row icon={<span className="h-0.5 w-6 rounded bg-[#8fd8ff]" />}>Thin blue arrow: a relation between two records (e.g. “made from”). Never a block.</Row>
-            <Row icon={<WormholeMark size={18} className="text-[#c9b3ff]" />}>Violet swirl: a portal or a wormhole to the same thing in another view.</Row>
-          </>
-        )}
-      </ul>
+      {recordsOnly ? (
+        <ul className="space-y-2.5 text-muted" data-legend="records">
+          <Row icon={<span className="h-5 w-5 rounded-full bg-[radial-gradient(circle,#fff_0%,#8b7cf6_35%,transparent_70%)]" />}>Galaxy: a group of systems.</Row>
+          <Row icon={<span className="h-5 w-5 rounded-full border-[3px] border-accent bg-[radial-gradient(circle_at_40%_36%,#fff,#8b7cf6)]" style={{ borderRightColor: 'rgba(255,255,255,.15)', borderBottomColor: 'rgba(255,255,255,.15)' }} />}>
+            Star: a system holding records. Bigger star = more records; its label says how many.
+          </Row>
+          {hostRows}
+        </ul>
+      ) : (
+        <ul className="space-y-2.5 text-muted">
+          <Row icon={<span className="h-5 w-5 rounded-full bg-[radial-gradient(circle,#fff_0%,#8b7cf6_35%,transparent_70%)]" />}>Galaxy: a group of projects. Denser spiral = more open work.</Row>
+          <Row icon={<span className="h-5 w-5 rounded-full border-[3px] border-accent bg-[radial-gradient(circle_at_40%_36%,#fff,#8b7cf6)]" style={{ borderRightColor: 'rgba(255,255,255,.15)', borderBottomColor: 'rgba(255,255,255,.15)' }} />}>
+            Star: a project. Ring = share of estimated work done. Bigger star = more open work.
+          </Row>
+          <Row icon={<span className="flex items-end gap-1"><span className="h-3 w-3 rounded-full bg-[radial-gradient(circle_at_35%_30%,#fff,#8b7cf6_40%,#2a2350)]" /><span className="h-5 w-5 rounded-full bg-[radial-gradient(circle_at_35%_30%,#fff,#8b7cf6_40%,#2a2350)]" /></span>}>Planet: a task. Size = estimated effort.</Row>
+          <Row icon={<span className="flex gap-1"><span className="h-4 w-4 rounded-full bg-[#7b7f93]" /><span className="h-4 w-4 rounded-full bg-[#8b7cf6]" /></span>}>Colour strength: priority, from grey (low) to vivid (critical).</Row>
+          <Row icon={<span className="flex gap-1"><span className="h-4 w-4 rounded-full shadow-[0_0_0_2px_#f2766b]" /><span className="h-4 w-4 rounded-full shadow-[0_0_0_2px_#f5b544]" /></span>}>Red glow: overdue. Amber glow: due today or tomorrow.</Row>
+          <Row icon={<span className="h-5 w-5 rounded-full border-[3px] border-[#2dd4bf]" style={{ borderLeftColor: 'transparent', borderBottomColor: 'transparent' }} />}>Teal arc: progress on the task.</Row>
+          <Row icon={<span className="h-4 w-4 rounded-full bg-[#2dd4bf] shadow-[0_0_12px_#2dd4bf]" />}>Teal glow: in focus right now.</Row>
+          <Row icon={<Pause size={16} className="text-text" />}>Parked, place saved (amber dashed orbit).</Row>
+          <Row icon={<Lock size={15} className="text-text" />}>Waiting on another task; dashed arrows show what blocks what.</Row>
+          {hosted && hostRows}
+        </ul>
+      )}
       <p className="mt-3 border-t border-line pt-3 text-xs text-faint">
         Click a galaxy or star to fly in · Esc goes up · [ ] previous / next · 0 whole universe · double-click to zoom · drag stars to rearrange, or onto another galaxy to move them · drag a galaxy’s name to move the galaxy.
       </p>

@@ -150,3 +150,17 @@ test('a ghost is faint, and an item that does not match a highlight dims (the po
   await expect.poll(() => opacity('i-trays')).toBeCloseTo(0.22, 2);
   expect(await opacity('i-canes')).toBe(1);
 });
+
+test('the legend of a verse that holds records lists only what is true for records; the work verse keeps its task entries', async ({ page }, info) => {
+  test.skip(info.project.name === 'phone', 'desktop canvas');
+  await openDemo(page);
+  await verseButton(page, 'things').click();
+  await page.getByRole('button', { name: 'What the shapes mean' }).click();
+  const panel = page.locator('div[data-ui].anim-pop').filter({ has: page.getByRole('heading', { name: 'Reading the universe' }) });
+  await expect(panel.getByText('In this view: Colour: kind of thing')).toBeVisible();
+  await expect(panel.getByText('Planet: a record, coloured by its kind.')).toBeVisible();
+  for (const task of ['Planet: a task', 'estimated effort', 'more open work', 'Waiting on another task', 'Teal glow']) await expect(panel).not.toContainText(task);
+  await verseButton(page, 'main').click();
+  await expect(panel.getByText('Planet: a task. Size = estimated effort.')).toBeVisible();
+  await expect(panel.getByText('Waiting on another task')).toBeVisible();
+});
