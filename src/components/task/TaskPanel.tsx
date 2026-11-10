@@ -31,6 +31,7 @@ import { DueBadge, ENERGY_META, PRIORITY_META, PriorityBars, ProjectChip } from 
 import { PlanTodayButton, StartFocusButton, useDraft } from './actions';
 import { KeptBy, LinkedItems } from './HostPanels';
 import { useAbilities } from '../../host/useAbilities';
+import { Wormholes } from '../host/Wormholes';
 import { may, mayWork, needsReason } from '../../host/caps';
 
 export function TaskPanel({ id }: { id: string }) {
@@ -109,6 +110,7 @@ export function TaskPanel({ id }: { id: string }) {
             ))}
           </dl>
         ) : null}
+        {task.host && <Wormholes also={task.host.also} />}
 
         {(editable || work || movable) && (
           <section className="grid grid-cols-2 gap-x-4 gap-y-4">

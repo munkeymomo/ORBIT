@@ -1,9 +1,12 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { onPanelSection, takePanelSection } from './panelSection';
-import { ExternalLink, Link2, Plus, X } from 'lucide-react';
+import { ExternalLink, Link2, MoreHorizontal, Plus, Search, X } from 'lucide-react';
 import { useOrbit } from '../../store/store';
 import type { HostRef, Task } from '../../types';
-import type { Attachment, Beacon, Collection, Family } from '../../host/types';
+import type { Also, Attachment, Beacon, Collection, Family, HostAction } from '../../host/types';
+import type { ItemPlanet } from '../../host/adapt';
+import { findItem, shownExtras, shownGroups, shownProjects } from '../../store/shown';
+import { useOfferedVerses, WormholeMark, Wormholes, wormholeText } from '../host/Wormholes';
 import { useAbilities } from '../../host/useAbilities';
 import { may } from '../../host/caps';
 import { CLUTTER } from '../universe/space';
@@ -47,6 +50,29 @@ function StateBadge({ a }: { a: Attachment }) {
   return <span className="rounded bg-surface-3 px-1.5 py-0.5 text-[10px] font-semibold text-muted uppercase">{a.state}</span>;
 }
 
+/** A small button with a menu of a record's wormholes (the same thing in other verses). */
+export function WormholeMenu({ also, label }: { also?: Also[]; label: string }) {
+  const verses = useOfferedVerses();
+  const follow = useOrbit((s) => s.followWormhole);
+  const holes = (also ?? []).filter((a) => verses.has(a.verse));
+  if (!holes.length) return null;
+  return (
+    <Menu
+      label={`${label} elsewhere`}
+      align="right"
+      trigger={(p) => (
+        <IconButton {...p} label={`${label}: the same thing in another view`} size="xs" className="text-[#c9b3ff]">
+          <WormholeMark size={13} />
+        </IconButton>
+      )}
+      items={holes.map((a) => {
+        const t = wormholeText(a, verses);
+        return { label: `${t.name}${t.note ? ` — ${t.note}` : ''}`, icon: <WormholeMark size={13} />, onSelect: () => void follow(a) };
+      })}
+    />
+  );
+}
+
 /** One attachment (a moon, or an item in a belt) as a row. */
 export function AttachmentRow({ a, families, onDetach }: { a: Attachment; families: Record<string, Family>; onDetach?: () => void }) {
   const openInHost = useOrbit((s) => s.openInHost);
@@ -58,6 +84,7 @@ export function AttachmentRow({ a, families, onDetach }: { a: Attachment; famili
         <span className="block truncate text-xs text-muted">{[families[a.family]?.label ?? a.kind, a.sub].filter(Boolean).join(' · ')}</span>
       </span>
       <StateBadge a={a} />
+      <WormholeMenu also={a.also} label={a.label} />
       {a.open && (
         <IconButton label={`Open ${a.label}`} size="xs" onClick={() => openInHost(a.open)}>
           <ExternalLink size={13} />
@@ -130,7 +157,7 @@ export function LinkedItems({ taskId }: { taskId: string }) {
 
 /** What a system holds that no task uses (its belt), listed or counted. */
 function Belt({ c }: { c: Collection }) {
-  const families = useOrbit((s) => s.host?.families ?? {});
+  const families = useOrbit((s) => shownExtras(s)?.families ?? NO_FAMILIES);
   const openInHost = useOrbit((s) => s.openInHost);
   const can = useAbilities();
   const many = c.total > CLUTTER.belt || !c.items?.length;
@@ -243,11 +270,28 @@ function Chips({ items }: { items: (string | undefined)[] }) {
   );
 }
 
-function Header({ kind, onClose }: { kind: string; onClose: () => void }) {
+const NO_FAMILIES: Record<string, Family> = {};
+
+function Header({ kind, onClose, actions, ctx }: { kind: string; onClose: () => void; actions?: HostAction[]; ctx?: Record<string, string> }) {
+  const hostAction = useOrbit((s) => s.hostAction);
+  const verse = useOrbit((s) => s.host?.shown ?? '');
   return (
     <header className="flex items-center gap-2 border-b border-line px-5 py-3">
       <span className="text-xs font-semibold tracking-[0.08em] text-muted uppercase">{kind}</span>
       <div className="flex-1" />
+      {!!actions?.length && (
+        // the host's own dialogs for this record: ORBIT draws none of them
+        <Menu
+          label={`${kind} actions`}
+          align="right"
+          trigger={(p) => (
+            <IconButton {...p} label={`${kind} actions`} size="sm">
+              <MoreHorizontal size={18} />
+            </IconButton>
+          )}
+          items={actions.map((a) => ({ label: a.label, onSelect: () => void hostAction(a.id, { verse, ...(ctx ?? {}) }) }))}
+        />
+      )}
       <IconButton label="Close (Esc)" size="sm" onClick={onClose}>
         <X size={18} />
       </IconButton>
@@ -301,11 +345,14 @@ function NewHostTask({ systemId }: { systemId: string }) {
 
 /** A system a host owns. */
 export function HostSystemPanel({ id }: { id: string }) {
-  const project = useOrbit((s) => s.projects.find((p) => p.id === id))!;
-  const tasks = useOrbit((s) => s.tasks);
-  const collection = useOrbit((s) => s.host?.collections[id]);
-  const beacons = useOrbit((s) => s.host?.beacons);
-  const { select, openInHost } = useOrbit.getActions();
+  const project = useOrbit((s) => shownProjects(s).find((p) => p.id === id))!;
+  const tasks = useOrbit((s) => (s.host?.sky ? NO_TASKS : s.tasks));
+  const collection = useOrbit((s) => shownExtras(s)?.collections[id]);
+  const beacons = useOrbit((s) => shownExtras(s)?.beacons);
+  const items = useOrbit((s) => shownExtras(s)?.items[id] ?? NO_ITEM_LIST);
+  const inSky = useOrbit((s) => !!s.host?.sky);
+  const portalVerse = useOfferedVerses().get(project.host?.portal?.verse ?? '');
+  const { select, openInHost, showVerse } = useOrbit.getActions();
   const can = useAbilities();
   const [showDone, setShowDone] = useState(false);
   const today = toDateKey(Date.now());
@@ -318,7 +365,9 @@ export function HostSystemPanel({ id }: { id: string }) {
   const mine = useMemo(() => (beacons ?? []).filter((b) => b.system === id), [beacons, id]);
   const visible = showDone ? own : own.filter((t) => t.status !== 'done');
   const busy = stats.open > CLUTTER.tasks;
-  const canCreate = may(can, ref, 'create');
+  const canCreate = !ref.portal && !inSky && may(can, ref, 'create');
+  const itemCount = items.length ? Math.max(ref.count ?? 0, items.length) : 0;
+  const showTasks = stats.total > 0 || canCreate || (!items.length && !ref.portal);
   const LIST_MAX = 60;
   // opened from the belt in the sky: show the belt list
   const beltRef = useRef<HTMLDivElement>(null);
@@ -336,7 +385,7 @@ export function HostSystemPanel({ id }: { id: string }) {
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      <Header kind="System" onClose={() => select(null)} />
+      <Header kind={ref.portal ? 'Portal' : 'System'} onClose={() => select(null)} actions={ref.actions} ctx={{ system: id, ...(project.groupId ? { galaxy: project.groupId } : {}) }} />
       <div className="min-h-0 flex-1 space-y-6 overflow-y-auto px-5 py-5">
         <div className="flex items-center gap-4">
           <ProgressRing value={stats.total ? stats.done / stats.total : 0} size={64} stroke={5} color={colorHex(project.color)} label={`${stats.done} of ${stats.total} tasks done`}>
@@ -350,9 +399,23 @@ export function HostSystemPanel({ id }: { id: string }) {
           </div>
         </div>
         {ref.note && <p className="rounded-xl border border-line bg-surface-2 px-3 py-2.5 text-sm">{ref.note}</p>}
+        {ref.portal && (
+          <button
+            data-portal-go={id}
+            disabled={!portalVerse}
+            onClick={() => portalVerse && void showVerse(portalVerse.id, project.groupId ? { galaxy: project.groupId } : undefined)}
+            className="flex w-full items-center gap-3 rounded-xl border border-[#b18cff]/60 bg-[#b18cff]/10 px-3 py-2.5 text-left enabled:hover:bg-[#b18cff]/20 disabled:opacity-50"
+          >
+            <WormholeMark size={20} className="shrink-0 text-[#c9b3ff]" />
+            <span className="min-w-0 flex-1">
+              <span className="block text-sm font-semibold">{ref.portal.label ?? `Go to ${portalVerse?.name ?? ref.portal.verse}`}</span>
+              <span className="block text-xs text-muted">{portalVerse ? `${portalVerse.name} · ${portalVerse.plain}, in the same galaxy` : 'That view is not offered now.'}</span>
+            </span>
+          </button>
+        )}
         <KeptBy refOf={ref} />
 
-        <dl className="grid grid-cols-3 gap-2 text-center">
+        {showTasks && <dl className="grid grid-cols-3 gap-2 text-center">
           {[
             ['Open', stats.open],
             ['Done', stats.done],
@@ -363,9 +426,11 @@ export function HostSystemPanel({ id }: { id: string }) {
               <dt className="text-[11px] text-muted">{k}</dt>
             </div>
           ))}
-        </dl>
-        {ref.count != null && ref.count > stats.total && <p className="-mt-3 text-xs text-muted">Stands for {ref.count} records in {can.name}; {stats.total} are shown here.</p>}
+        </dl>}
+        {showTasks && ref.count != null && ref.count > stats.total && !items.length && <p className="-mt-3 text-xs text-muted">Stands for {ref.count} records in {can.name}; {stats.total} are shown here.</p>}
         <Facts facts={ref.facts} />
+        <Wormholes also={ref.also} />
+        {items.length > 0 && <ItemList items={items} count={itemCount} />}
 
         {busy && (
           <div className="rounded-xl border border-amber/40 bg-amber-soft p-3 text-sm">
@@ -387,7 +452,7 @@ export function HostSystemPanel({ id }: { id: string }) {
           </div>
         )}
 
-        <section>
+        {showTasks && <section>
           <SectionTitle
             right={
               stats.done > 0 && (
@@ -403,23 +468,165 @@ export function HostSystemPanel({ id }: { id: string }) {
           {visible.length === 0 && <p className="py-3 text-center text-sm text-muted">{own.length ? 'All done here.' : 'No tasks.'}</p>}
           <TaskRows tasks={visible.slice(0, LIST_MAX)} today={today} />
           {visible.length > LIST_MAX && <p className="mt-1.5 px-2.5 text-xs text-muted">and {visible.length - LIST_MAX} more; search finds any of them.</p>}
-        </section>
+        </section>}
       </div>
     </div>
   );
 }
 
+const NO_TASKS: Task[] = [];
+const NO_ITEM_LIST: ItemPlanet[] = [];
+
+/** A system's items, listed (scrollable; type to narrow it down). Each opens the item's panel. */
+function ItemList({ items, count }: { items: ItemPlanet[]; count: number }) {
+  const families = useOrbit((s) => shownExtras(s)?.families ?? NO_FAMILIES);
+  const select = useOrbit((s) => s.select);
+  const can = useAbilities();
+  const [q, setQ] = useState('');
+  const needle = q.trim().toLowerCase();
+  const shown = needle ? items.filter((i) => `${i.title} ${i.sub ?? ''} ${families[i.family]?.label ?? i.kind}`.toLowerCase().includes(needle)) : items;
+  const many = items.length > CLUTTER.tasks;
+  return (
+    <section>
+      <SectionTitle right={<span className="tabular text-xs text-muted">{count}</span>}>Items</SectionTitle>
+      {many && <p className="mb-2 text-xs text-muted">Too many to draw one by one: the sky shows them as a ring of dots.</p>}
+      {items.length > 8 && (
+        <label className="mb-2 flex h-9 items-center gap-2 rounded-lg border border-line bg-surface-2 px-2.5 focus-within:border-accent">
+          <Search size={14} className="text-faint" />
+          <input value={q} onChange={(e) => setQ(e.target.value)} placeholder={`Find among ${items.length}…`} aria-label="Find an item in this system" className="h-full min-w-0 flex-1 bg-transparent text-sm outline-none placeholder:text-faint" />
+        </label>
+      )}
+      <ul className={cx('space-y-0.5', items.length > 12 && 'max-h-[360px] overflow-y-auto pr-1')} data-item-list>
+        {shown.map((it) => (
+          <li key={it.id}>
+            <button onClick={() => select({ type: 'item', id: it.id })} className="flex w-full items-center gap-2.5 rounded-lg px-2 py-1.5 text-left hover:bg-surface-2">
+              <FamilyDot family={it.family} families={families} state={it.ghost ? 'archived' : it.state} />
+              <span className="min-w-0 flex-1">
+                <span className={cx('block truncate text-sm', it.state === 'gone' && 'text-faint line-through', it.ghost && 'text-muted italic')}>{it.title}</span>
+                <span className="block truncate text-xs text-muted">{[families[it.family]?.label ?? it.kind, it.sub, it.ghost ? 'lives elsewhere' : undefined].filter(Boolean).join(' · ')}</span>
+              </span>
+              {it.state !== 'live' && <span className="rounded bg-surface-3 px-1.5 py-0.5 text-[10px] font-semibold text-muted uppercase">{it.state}</span>}
+            </button>
+          </li>
+        ))}
+        {!shown.length && <li className="px-2 py-2 text-sm text-muted">Nothing here matches “{q}”.</li>}
+      </ul>
+      {count > items.length && <p className="mt-1.5 px-2 text-xs text-muted">{items.length} of {count} are shown here; the rest are in {can.name}.</p>}
+    </section>
+  );
+}
+
+const STATE_WORD: Record<ItemPlanet['state'], string> = { live: 'Current', archived: 'Archived', gone: 'Gone' };
+
+/** A record shown as a planet (an item). Read-only: what the host sent, its moons, its wormholes, and a way to it. */
+export function ItemPanel({ id }: { id: string }) {
+  const it = useOrbit((s) => findItem(s, id))!;
+  const families = useOrbit((s) => shownExtras(s)?.families ?? NO_FAMILIES);
+  const system = useOrbit((s) => shownProjects(s).find((p) => p.id === it.system));
+  const galaxy = useOrbit((s) => (system?.groupId ? shownGroups(s).find((g) => g.id === system.groupId) : undefined));
+  const { select, openInHost, requestFlight } = useOrbit.getActions();
+  const can = useAbilities();
+  const fam = families[it.family];
+  const hex = fam?.color ?? '#9aa3b8';
+  const where = (
+    <p className="text-sm text-muted">
+      In{' '}
+      {system ? (
+        <button className="text-accent-ink hover:underline" onClick={() => (requestFlight('system', system.id), select({ type: 'project', id: system.id }))}>
+          {system.name}
+        </button>
+      ) : (
+        'a system'
+      )}
+      {galaxy ? ` · ${galaxy.name}` : ''}
+    </p>
+  );
+  if (it.ghost)
+    return (
+      <div className="flex min-h-0 flex-1 flex-col">
+        <Header kind="Lives elsewhere" onClose={() => select(null)} />
+        <div className="min-h-0 flex-1 space-y-6 overflow-y-auto px-5 py-5">
+          <div className="flex items-center gap-3">
+            <span className="h-9 w-9 shrink-0 rounded-full border-2 border-dashed" style={{ borderColor: hex }} aria-hidden />
+            <div className="min-w-0">
+              <h2 className="font-display text-[22px] leading-tight font-semibold tracking-tight text-muted italic">{it.title}</h2>
+              {where}
+            </div>
+          </div>
+          <p className="rounded-xl border border-line bg-surface-2 px-3 py-2.5 text-sm">Shown here, but it lives elsewhere. The way home:</p>
+          <Wormholes also={it.also} title="Where it lives" />
+          {!it.also.length && <p className="text-sm text-muted">{can.name} did not say where it lives.</p>}
+        </div>
+      </div>
+    );
+  return (
+    <div className="flex min-h-0 flex-1 flex-col">
+      <Header kind={fam?.label ?? 'Item'} onClose={() => select(null)} />
+      <div className="min-h-0 flex-1 space-y-6 overflow-y-auto px-5 py-5">
+        <div className="flex items-center gap-4">
+          <ProgressRing value={it.ring ?? 0} size={64} stroke={5} color="#eef2ff" label={it.ring != null ? `Ring: ${Math.round(it.ring * 100)}%` : 'No ring'}>
+            <span
+              className="h-9 w-9 rounded-full"
+              style={it.state === 'live' ? { background: `radial-gradient(circle at 38% 34%, #fff 0%, ${hex} 40%, color-mix(in srgb, ${hex} 45%, black) 100%)` } : { boxShadow: `inset 0 0 0 2.5px ${hex}` }}
+              aria-hidden
+            />
+          </ProgressRing>
+          <div className="min-w-0 flex-1">
+            <h2 className={cx('font-display text-[22px] leading-tight font-semibold tracking-tight break-words', it.state === 'gone' && 'text-muted line-through')}>{it.title}</h2>
+            {it.sub && <p className="mt-0.5 text-sm text-muted">{it.sub}</p>}
+            <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
+              <span className="inline-flex items-center gap-1.5 rounded-full border border-line bg-surface-2 px-2.5 py-0.5 text-xs">
+                <span className="h-2 w-2 rounded-full" style={{ background: hex }} /> {fam?.label ?? it.kind}
+              </span>
+              <span className={cx('rounded-full px-2.5 py-0.5 text-xs font-semibold', it.state === 'live' ? 'bg-teal/15 text-teal' : 'bg-surface-3 text-muted')} data-item-state={it.state}>
+                {STATE_WORD[it.state]}
+              </span>
+            </div>
+          </div>
+        </div>
+        {where}
+        {it.note && <p className="rounded-xl border border-line bg-surface-2 px-3 py-2.5 text-sm">{it.note}</p>}
+        {it.notes && <p className="text-sm whitespace-pre-wrap text-muted">{it.notes}</p>}
+        <Facts facts={it.facts} />
+        {(it.moons.items.length > 0 || it.moons.more > 0) && (
+          <section>
+            <SectionTitle right={<span className="tabular text-xs text-muted">{it.moons.items.length + it.moons.more}</span>}>Moons</SectionTitle>
+            <ul className="space-y-0.5" data-item-moons>
+              {it.moons.items.map((a) => (
+                <AttachmentRow key={a.id} a={a} families={families} />
+              ))}
+            </ul>
+            {it.moons.more > 0 && <p className="mt-1.5 px-2 text-xs text-muted">+{it.moons.more} more in {can.name}</p>}
+          </section>
+        )}
+        <Wormholes also={it.also} />
+        {it.open && (
+          <Button variant="secondary" icon={<ExternalLink size={15} />} onClick={() => openInHost(it.open)} className="w-full">
+            {can.openLabel}
+          </Button>
+        )}
+      </div>
+    </div>
+  );
+}
+
+
 /** A galaxy a host owns. */
 export function HostGalaxyPanel({ id }: { id: string }) {
-  const galaxy = useOrbit((s) => s.groups.find((g) => g.id === id))!;
-  const projects = useOrbit((s) => s.projects);
-  const tasks = useOrbit((s) => s.tasks);
-  const beacons = useOrbit((s) => s.host?.beacons);
-  const cluster = useOrbit((s) => s.host?.clusters.find((c) => c.id === galaxy.host?.cluster));
+  const galaxy = useOrbit((s) => shownGroups(s).find((g) => g.id === id))!;
+  const projects = useOrbit((s) => shownProjects(s));
+  const tasks = useOrbit((s) => (s.host?.sky ? NO_TASKS : s.tasks));
+  const beacons = useOrbit((s) => shownExtras(s)?.beacons);
+  const itemsBySystem = useOrbit((s) => shownExtras(s)?.items);
+  const cluster = useOrbit((s) => shownExtras(s)?.clusters.find((c) => c.id === galaxy.host?.cluster));
   const { select, requestFlight } = useOrbit.getActions();
   const today = toDateKey(Date.now());
   const ref = galaxy.host!;
-  const members = useMemo(() => projects.filter((p) => p.groupId === id).map((p) => ({ p, s: projectStats(p.id, tasks, today) })), [projects, tasks, id, today]);
+  const members = useMemo(
+    () => projects.filter((p) => p.groupId === id).map((p) => ({ p, s: projectStats(p.id, tasks, today), items: itemsBySystem?.[p.id]?.length ? Math.max(p.host?.count ?? 0, itemsBySystem[p.id].length) : 0 })),
+    [projects, tasks, id, today, itemsBySystem],
+  );
+  const items = members.reduce((a, m) => a + m.items, 0);
   const mine = useMemo(() => (beacons ?? []).filter((b) => b.galaxy === id), [beacons, id]);
   const total = members.reduce((a, m) => a + m.s.total, 0);
   const done = members.reduce((a, m) => a + m.s.done, 0);
@@ -429,7 +636,7 @@ export function HostGalaxyPanel({ id }: { id: string }) {
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      <Header kind="Galaxy" onClose={() => select(null)} />
+      <Header kind="Galaxy" onClose={() => select(null)} actions={ref.actions} ctx={{ galaxy: id }} />
       <div className="min-h-0 flex-1 space-y-6 overflow-y-auto px-5 py-5">
         <div className="flex items-center gap-4">
           <ProgressRing value={total ? done / total : 0} size={64} stroke={5} color={hex} label={`${total ? Math.round((done / total) * 100) : 0}% of tasks done`}>
@@ -438,19 +645,23 @@ export function HostGalaxyPanel({ id }: { id: string }) {
           <div className="min-w-0 flex-1">
             <h2 className="font-display text-[22px] leading-tight font-semibold tracking-tight">{galaxy.name}</h2>
             <p className="tabular text-sm text-muted">
-              {members.length} system{members.length === 1 ? '' : 's'} · {open} open{overdue ? <span className="text-danger"> · {overdue} overdue</span> : null}
+              {members.length} system{members.length === 1 ? '' : 's'}
+              {total > 0 && ` · ${open} open`}
+              {items > 0 && ` · ${items} item${items === 1 ? '' : 's'}`}
+              {overdue ? <span className="text-danger"> · {overdue} overdue</span> : null}
             </p>
           </div>
         </div>
         <Chips items={[ref.chip ?? ref.status, cluster ? `in ${cluster.name}` : undefined, ref.finished ? 'finished' : undefined]} />
         <KeptBy refOf={ref} />
         <Facts facts={ref.facts} />
+        <Wormholes also={ref.also} />
         <BeaconList beacons={mine} />
         <section>
           <SectionTitle>Systems</SectionTitle>
           {members.length === 0 && <p className="py-3 text-center text-sm text-muted">No systems.</p>}
           <ul className="space-y-1">
-            {members.map(({ p, s }) => (
+            {members.map(({ p, s, items: n }) => (
               <li key={p.id}>
                 <button
                   onClick={() => {
@@ -463,7 +674,7 @@ export function HostGalaxyPanel({ id }: { id: string }) {
                   <span className="min-w-0 flex-1">
                     <span className="block truncate text-sm font-medium">{p.name}</span>
                     <span className="tabular block text-xs text-muted">
-                      {[p.host?.code, `${s.open} open`].filter(Boolean).join(' · ')}
+                      {[p.host?.code, p.host?.portal ? 'portal' : undefined, s.total || !n ? `${s.open} open` : undefined, n ? `${n} items` : undefined].filter(Boolean).join(' · ')}
                       {s.overdue ? <span className="text-danger"> · {s.overdue} overdue</span> : null}
                     </span>
                   </span>
@@ -479,8 +690,8 @@ export function HostGalaxyPanel({ id }: { id: string }) {
 
 /** A date that matters (a beacon). */
 export function BeaconPanel({ id }: { id: string }) {
-  const b = useOrbit((s) => s.host?.beacons.find((x) => x.id === id))!;
-  const where = useOrbit((s) => (b.system ? s.projects.find((p) => p.id === b.system) : s.groups.find((g) => g.id === b.galaxy)));
+  const b = useOrbit((s) => shownExtras(s)?.beacons.find((x) => x.id === id))!;
+  const where = useOrbit((s) => (b.system ? shownProjects(s).find((p) => p.id === b.system) : shownGroups(s).find((g) => g.id === b.galaxy)));
   const { select, openInHost, requestFlight } = useOrbit.getActions();
   const can = useAbilities();
   const today = toDateKey(Date.now());
