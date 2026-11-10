@@ -18,6 +18,7 @@ import { SortableContext, sortableKeyboardCoordinates, useSortable, verticalList
 import { CSS } from '@dnd-kit/utilities';
 import { Check, ChevronLeft, ChevronRight, CircleCheck, Clock, GripVertical, MoreHorizontal, Pause, Play, Plus, Search, X } from 'lucide-react';
 import { useOrbit } from '../../store/store';
+import { comingUp } from '../../store/selectors';
 import type { DayItem, DaySlot, Project, Task } from '../../types';
 import { colorHex } from '../../lib/colors';
 import { taskProgress } from '../../lib/scoring';
@@ -27,7 +28,6 @@ import { Button, IconButton, Input, Menu, Toggle, cx } from '../ui/primitives';
 import { DueBadge, EnergyIcon, PriorityBars } from '../ui/visuals';
 import { useSuggestions } from '../next/useSuggestions';
 import { BEACON_TONE, BeaconDiamond, beaconWhen } from '../task/HostPanels';
-import type { Beacon } from '../../host/types';
 
 type Entry = { item: DayItem; task: Task; project: Project | undefined };
 
@@ -420,10 +420,7 @@ function ComingUp() {
   const beacons = useOrbit((s) => s.host?.beacons);
   const select = useOrbit((s) => s.select);
   const today = toDateKey(Date.now());
-  const near = useMemo(() => {
-    const due = (b: Beacon) => b.due ?? '9999-12-31';
-    return (beacons ?? []).filter((b) => b.state === 'soon' || b.state === 'late').sort((a, b) => due(a).localeCompare(due(b)) || a.title.localeCompare(b.title));
-  }, [beacons]);
+  const { shown: near, more } = useMemo(() => comingUp(beacons), [beacons]);
   if (!near.length) return null;
   return (
     <section aria-label="Coming up" className="flex items-center gap-2 overflow-x-auto border-b border-line px-4 py-1.5 md:px-6">
@@ -445,6 +442,20 @@ function ComingUp() {
             </button>
           </li>
         ))}
+        {more.length > 0 && (
+          <li className="shrink-0">
+            <Menu
+              label={`${more.length} more dates`}
+              align="left"
+              trigger={(p) => (
+                <button {...p} className="rounded-lg px-2 py-1 text-[13px] font-medium text-muted hover:bg-surface-2 hover:text-text">
+                  +{more.length} more
+                </button>
+              )}
+              items={more.map((b) => ({ label: `${b.code ? `${b.code} ` : ''}${b.title} · ${beaconWhen(b, today)}`, onSelect: () => select({ type: 'beacon', id: b.id }) }))}
+            />
+          </li>
+        )}
       </ul>
     </section>
   );

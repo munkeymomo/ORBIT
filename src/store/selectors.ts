@@ -101,3 +101,18 @@ export function completedByDay(tasks: Task[], days: string[], projects: Project[
 export function sessionsForTask(sessions: FocusSession[], taskId: string): FocusSession[] {
   return sessions.filter((s) => s.taskId === taskId && s.kind === 'focus').sort((a, b) => b.startedAt - a.startedAt);
 }
+
+/** How many dates the "Coming up" strip shows; the rest open from "+n more". */
+export const COMING_UP_MAX = 6;
+
+/**
+ * The host's dates that need action, in the order they do: those coming up first (soonest due first), then those
+ * already late (most recently late first, so a pile of long-late dates sits behind this week's).
+ */
+export function comingUp<B extends { title: string; due?: string | null; state: string }>(beacons: B[] | undefined, max = COMING_UP_MAX): { shown: B[]; more: B[] } {
+  const byTitle = (a: B, b: B) => a.title.localeCompare(b.title);
+  const soon = (beacons ?? []).filter((b) => b.state === 'soon').sort((a, b) => (a.due ?? '9999-12-31').localeCompare(b.due ?? '9999-12-31') || byTitle(a, b));
+  const late = (beacons ?? []).filter((b) => b.state === 'late').sort((a, b) => (b.due ?? '').localeCompare(a.due ?? '') || byTitle(a, b));
+  const all = [...soon, ...late];
+  return { shown: all.slice(0, max), more: all.slice(max) };
+}

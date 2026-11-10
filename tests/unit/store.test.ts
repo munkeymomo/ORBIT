@@ -331,3 +331,24 @@ describe('example workspace', () => {
     expect(s().sessions).toHaveLength(0);
   });
 });
+
+describe('coming up', () => {
+  it('soonest first, then the most recently late, capped with the rest behind', async () => {
+    const { comingUp } = await import('../../src/store/selectors');
+    const b = (id: string, state: string, due: string | null) => ({ id, title: id, state, due });
+    const all = [
+      b('late-old', 'late', '2026-01-05'),
+      b('soon-b', 'soon', '2026-11-14'),
+      b('late-new', 'late', '2026-11-08'),
+      b('soon-a', 'soon', '2026-11-11'),
+      b('planned', 'planned', '2026-12-01'),
+      b('late-mid', 'late', '2026-06-01'),
+      b('soon-c', 'soon', '2026-11-16'),
+      b('late-none', 'late', null),
+    ];
+    const r = comingUp(all);
+    expect(r.shown.map((x) => x.id)).toEqual(['soon-a', 'soon-b', 'soon-c', 'late-new', 'late-mid', 'late-old']);
+    expect(r.more.map((x) => x.id)).toEqual(['late-none']);
+    expect(comingUp(undefined)).toEqual({ shown: [], more: [] });
+  });
+});
