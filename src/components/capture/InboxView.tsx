@@ -9,10 +9,14 @@ import { SLOTS, currentSlot, relativeTime } from '../../lib/util';
 import { Button, EmptyState, Field, IconButton, Input, Modal, SectionTitle, Segmented, cx } from '../ui/primitives';
 import { ProjectChip } from '../ui/visuals';
 import { ProjectSelect } from '../task/TaskPanel';
+import { useAbilities, useTakesTasks } from '../../host/useAbilities';
 
 export function InboxView() {
   const captures = useOrbit((s) => s.captures);
-  const projects = useOrbit((s) => s.projects);
+  const takes = useTakesTasks();
+  const allProjects = useOrbit((s) => s.projects);
+  // only where a task can be filed (a host's systems per their caps)
+  const projects = useMemo(() => allProjects.filter(takes), [allProjects, takes]);
   const { sortCapture, toast } = useOrbit.getActions();
   const phone = useIsPhone();
   const [sorting, setSorting] = useState<Capture | null>(null);
@@ -180,7 +184,10 @@ function ProjectDrop({ p, active }: { p: Project; active: boolean }) {
 }
 
 function SortDialog({ c, onClose }: { c: Capture; onClose: () => void }) {
-  const projects = useOrbit((s) => s.projects);
+  const takes = useTakesTasks();
+  const allProjects = useOrbit((s) => s.projects);
+  const projects = useMemo(() => allProjects.filter(takes), [allProjects, takes]);
+  const can = useAbilities();
   const { sortCapture, toast, select, createProject } = useOrbit.getActions();
   const [title, setTitle] = useState(c.text);
   const [projectId, setProjectId] = useState(projects[0]?.id ?? '');
@@ -214,9 +221,9 @@ function SortDialog({ c, onClose }: { c: Capture; onClose: () => void }) {
         <Field label="Task title">
           <Input value={title} onChange={(e) => setTitle(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && submit()} />
         </Field>
-        {projects.length ? (
+        {projects.length || !can.personal ? (
           <Field label="Project">
-            <ProjectSelect value={projectId} onChange={setProjectId} />
+            <ProjectSelect value={projectId} onChange={setProjectId} only={takes} />
           </Field>
         ) : (
           <Field label="New project" hint="You do not have any projects yet — name one to file this in.">

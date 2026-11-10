@@ -41,7 +41,7 @@ export function TabBar() {
         <Tab id="universe" label="Universe" icon={Orbit} />
         {can.work && <Tab id="today" label="Today" icon={CalendarDays} />}
         <div className="flex flex-1 items-center justify-center">
-          {can.personal && <button
+          {can.capture && <button
             onClick={() => setCaptureOpen(true)}
             aria-label="Capture"
             className="-mt-5 flex h-14 w-14 items-center justify-center rounded-2xl bg-accent text-white shadow-[0_8px_24px_-6px_var(--accent)] active:scale-95"
@@ -49,7 +49,7 @@ export function TabBar() {
             <Plus size={26} strokeWidth={2.4} />
           </button>}
         </div>
-        {can.personal && <Tab id="inbox" label="Inbox" icon={Inbox} badge={inbox} />}
+        {can.capture && <Tab id="inbox" label="Inbox" icon={Inbox} badge={inbox} />}
         <button
           onClick={() => setMore(true)}
           aria-haspopup="dialog"

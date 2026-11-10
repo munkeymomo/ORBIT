@@ -6,6 +6,7 @@ import { startVoice, voiceSupported } from '../../lib/platform';
 import { SLOTS, toDateKey } from '../../lib/util';
 import { Button, IconButton, Kbd, Modal, Segmented, cx } from '../ui/primitives';
 import { ProjectChip } from '../ui/visuals';
+import { useTakesTasks } from '../../host/useAbilities';
 
 const norm = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, '');
 
@@ -17,7 +18,9 @@ export function CaptureDialog() {
 }
 
 function Capture({ onClose }: { onClose: () => void }) {
-  const projects = useOrbit((s) => s.projects);
+  const takes = useTakesTasks();
+  const allProjects = useOrbit((s) => s.projects);
+  const projects = useMemo(() => allProjects.filter(takes), [allProjects, takes]);
   const { addCapture, createTask, planTask, toast } = useOrbit.getActions();
   const [text, setText] = useState('');
   const [kind, setKind] = useState<'task' | 'thought'>('task');

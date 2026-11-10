@@ -58,7 +58,7 @@ export function Dock() {
           />
         )}
       </div>
-      {can.personal && (
+      {can.capture && (
         <Button variant="secondary" onClick={() => setCaptureOpen(true)} icon={<Plus size={16} />} className="shrink-0" title="Capture (C)">
           <span className="hidden md:inline">Capture</span>
         </Button>

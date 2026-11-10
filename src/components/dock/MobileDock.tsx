@@ -158,7 +158,7 @@ function DockSheet({ open, onClose }: { open: boolean; onClose: () => void }) {
   const task = useOrbit((s) => (s.focus?.taskId ? s.tasks.find((t) => t.id === s.focus!.taskId) : null));
   const parked = useDockData();
   const { openPark, completeTask, stopFocus, openResume, setCaptureOpen, setView } = useOrbit.getActions();
-  const canCapture = useAbilities().personal;
+  const canCapture = useAbilities().capture;
   const act = (fn: () => void) => () => {
     onClose();
     fn();

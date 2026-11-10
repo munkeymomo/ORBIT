@@ -163,11 +163,11 @@ function Setup() {
   const { startFocus, startBreak, dismissLastFocusEnd, openResume } = useOrbit.getActions();
   const { suggestions } = useSuggestions();
   const top = suggestions[0]?.task;
-  const [taskId, setTaskId] = useState<string>(() => last?.taskId ?? (top && !top.host ? top.id : '') ?? '');
+  const can = useAbilities();
+  const [taskId, setTaskId] = useState<string>(() => last?.taskId ?? (top && mayWork(can, top.host) ? top.id : '') ?? '');
   const [minutes, setMinutes] = useState(prefs.focusMin);
   const [custom, setCustom] = useState('');
   const [mode, setMode] = useState<TimerMode>('countdown');
-  const can = useAbilities();
   // Tasks a host keeps can only be focused on when the host keeps working state for them.
   const open = tasks.filter((t) => t.status !== 'done' && mayWork(can, t.host));
   const chosen = tasks.find((t) => t.id === taskId);
