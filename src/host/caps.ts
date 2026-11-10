@@ -6,11 +6,11 @@ import type { HostRef } from '../types';
 import type { Caps, Handshake } from './types';
 
 /**
- * What this build can do with the host's capabilities. This is the read-only stage: whatever a host offers,
- * host-owned records are not changed, ORBIT keeps no records of its own with the host and no working state
- * for host tasks. Later stages turn these on as the store learns to route each change to the host.
+ * What this build can do with the host's capabilities. Host-owned tasks can be changed (through
+ * `host.tasks`, per record caps) and ORBIT keeps working state for them in `host.store`. ORBIT does not yet
+ * keep records of its own (galaxies, projects, tasks) with a host: a later stage turns `personal` on.
  */
-export const BUILD_SUPPORTS = { write: false, personal: false, work: false } as const;
+export const BUILD_SUPPORTS = { write: true, personal: false, work: true } as const;
 
 export interface HostAbilities {
   hosted: boolean;
@@ -22,6 +22,8 @@ export interface HostAbilities {
   personal: boolean;
   /** Focus, parking and day plans are available for host tasks. */
   work: boolean;
+  /** Capture and the inbox are available (with personal records, or with working state). */
+  capture: boolean;
   /** Set while the host refuses changes; the text says why. */
   locked?: string;
   /** "Open in <host>" */
@@ -30,18 +32,21 @@ export interface HostAbilities {
   storedLabel: string;
 }
 
-export const STANDALONE: HostAbilities = { hosted: false, name: 'ORBIT', write: true, personal: true, work: true, openLabel: '', storedLabel: '' };
+export const STANDALONE: HostAbilities = { hosted: false, name: 'ORBIT', write: true, personal: true, work: true, capture: true, openLabel: '', storedLabel: '' };
 
 export function abilities(info: Handshake | null | undefined): HostAbilities {
   if (!info) return STANDALONE;
   const name = info.host?.name?.trim() || 'the host';
+  const personal = !!info.caps?.personal && BUILD_SUPPORTS.personal;
+  const work = !!info.caps?.work && BUILD_SUPPORTS.work;
   return {
     hosted: true,
     name,
     write: !!info.caps?.write && BUILD_SUPPORTS.write,
-    personal: !!info.caps?.personal && BUILD_SUPPORTS.personal,
-    work: !!info.caps?.work && BUILD_SUPPORTS.work,
-    locked: info.locked,
+    personal,
+    work,
+    capture: personal || work,
+    locked: typeof info.locked === 'string' && info.locked.trim() ? info.locked.trim() : undefined,
     openLabel: info.labels?.open?.trim() || `Open in ${name}`,
     storedLabel: info.labels?.stored?.trim() || `Kept by ${name}`,
   };
@@ -53,6 +58,11 @@ type Cap = Exclude<keyof Caps, 'reason'>;
 export function may(a: HostAbilities, ref: HostRef | undefined, cap: Cap): boolean {
   if (!ref) return true;
   return a.write && !a.locked && !!ref.caps[cap];
+}
+
+/** Does the host ask for a reason before this change? */
+export function needsReason(ref: HostRef | undefined, what: 'delete' | 'drop'): boolean {
+  return !!ref?.caps.reason?.includes(what);
 }
 
 /** May focus, parking and the day plan be used with this task? */
@@ -67,4 +77,8 @@ export const refusal = {
   work: (a: HostAbilities) => `Focus, parking and day plans are not available for tasks kept by ${a.name}.`,
   move: (a: HostAbilities) => `This system is kept by ${a.name}; move it to another galaxy there. You can still drag it to a new place in its own galaxy.`,
   data: (a: HostAbilities) => `Backups, examples and erasing are not available while ${a.name} keeps the records.`,
+  remove: (a: HostAbilities) => a.locked || `This is kept by ${a.name}; ORBIT does not delete it. Open it there to remove it.`,
+  boundary: (a: HostAbilities) => `Tasks and systems kept by ${a.name} stay with it, and ORBIT’s own stay with ORBIT: they cannot be moved across.`,
+  target: (a: HostAbilities) => `${a.name} does not take tasks in that system.`,
+  reason: (a: HostAbilities, what: 'delete' | 'drop') => `${a.name} asks for a reason to ${what} this task.`,
 };

@@ -106,13 +106,14 @@ describe('the fake host speaks protocol 1 (validated against the JSON Schema)', 
     expect(Math.max(...bySystem.values())).toBeGreaterThan(40);
   });
 
-  it('offers no capabilities, and this build supports none yet', async () => {
+  it('offers no capabilities by default; this build supports write and work but not personal', async () => {
     const info = await createFakeHost().handshake();
     expect(info.caps).toEqual({ write: false, personal: false, work: false });
-    expect(BUILD_SUPPORTS).toEqual({ write: false, personal: false, work: false });
-    // even a host offering everything is read-only in this build
+    expect(abilities(info)).toMatchObject({ write: false, personal: false, work: false, capture: false });
+    expect(BUILD_SUPPORTS).toEqual({ write: true, personal: false, work: true });
+    // a host offering everything gets what this build supports
     const a = abilities({ ...info, caps: { write: true, personal: true, work: true } });
-    expect([a.write, a.personal, a.work]).toEqual([false, false, false]);
+    expect([a.write, a.personal, a.work]).toEqual([true, false, true]);
   });
 });
 
@@ -330,7 +331,8 @@ describe('hosted store: read-only guards (every action that would change a host 
   it('createTask in a host system', () => guarded((s) => s.createTask({ projectId: 's-beds', title: 'New' })));
   it('createTask anywhere else (no personal records)', () => guarded((s) => s.createTask({ projectId: 'nowhere', title: 'New' }), personal));
   it('updateTask', () => guarded((s) => s.updateTask('t-compost', { title: 'Changed' })));
-  it('deleteTask', () => guarded((s) => s.deleteTask('t-compost')));
+  const removed = /This is kept by Demo host; ORBIT does not delete it/;
+  it('deleteTask', () => guarded((s) => s.deleteTask('t-compost'), removed));
   it('completeTask', () => guarded((s) => s.completeTask('t-compost')));
   it('reopenTask', () => guarded((s) => s.reopenTask('t-seeds')));
   it('parkTask', () => guarded((s) => s.parkTask('t-compost', { nextAction: 'x' }), work));
@@ -349,9 +351,9 @@ describe('hosted store: read-only guards (every action that would change a host 
   });
   it('updateProject (anything but its place)', () => guarded((s) => s.updateProject('s-beds', { name: 'Renamed', color: 'rose' })));
   it('updateProject into another galaxy (drag a star across)', () => guarded((s) => s.updateProject('s-beds', { groupId: 'g-move', x: 1, y: 1 }), /move it to another galaxy there/));
-  it('deleteProject', () => guarded((s) => s.deleteProject('s-beds')));
+  it('deleteProject', () => guarded((s) => s.deleteProject('s-beds'), removed));
   it('updateGroup (anything but its place)', () => guarded((s) => s.updateGroup('g-garden', { name: 'Renamed' })));
-  it('deleteGroup', () => guarded((s) => s.deleteGroup('g-garden')));
+  it('deleteGroup', () => guarded((s) => s.deleteGroup('g-garden'), removed));
   it('createGroup', () => guarded((s) => s.createGroup('Mine'), personal));
   it('createProject', () => guarded((s) => s.createProject({ name: 'Mine' }), personal));
   it('createProject in a host galaxy', () => guarded((s) => s.createProject({ name: 'Mine', groupId: 'g-garden' }), personal));

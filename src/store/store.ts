@@ -20,6 +20,7 @@ import type {
   Snapshot,
   TableName,
   Task,
+  TaskWork,
   TimerMode,
   ViewName,
 } from '../types';
@@ -30,11 +31,12 @@ import { uid, toDateKey } from '../lib/util';
 import { nextUnusedColor } from '../lib/colors';
 import { buildExample } from '../data/example';
 import { findFreeSpot, nextGalaxySpot, spiralLayout, SYSTEM_SPACING, type Pt } from '../data/layout';
-import type { Handshake, Open, OrbitHost } from '../host/types';
+import type { Handshake, Open, OrbitHost, Planet } from '../host/types';
 import { isUnchanged } from '../host/types';
-import { adaptVerse, DEEP_SPACE, placementKey, type HostExtras } from '../host/adapt';
-import { abilities, may, mayWork, refusal, STANDALONE, type HostAbilities } from '../host/caps';
-import { createRecordWriter } from '../host/writer';
+import { adaptVerse, DEEP_SPACE, placementKey, planetToTask, type HostExtras } from '../host/adapt';
+import { abilities, may, mayWork, needsReason, refusal, STANDALONE, type HostAbilities } from '../host/caps';
+import { createRecordWriter, type HostedWriting, type WriteOptions } from '../host/writer';
+import { HOST_FIELDS, overlayWork, WORK_FIELDS } from '../host/work';
 
 /* ---------------- UI-only types ---------------- */
 
@@ -61,7 +63,9 @@ export interface ConfirmRequest {
   body?: string;
   confirmLabel: string;
   danger?: boolean;
-  onConfirm: () => void;
+  /** Ask for a few words with the confirmation (e.g. a reason the host wants). */
+  reason?: { label: string; placeholder?: string; required?: boolean };
+  onConfirm: (reason?: string) => void;
 }
 
 /** What the park sheet should do: park a task, or edit an existing (auto) checkpoint. */
@@ -157,6 +161,14 @@ export interface OrbitState extends Snapshot {
   // host
   /** Ask the host for the verse again; nothing changes on screen when the host answers "unchanged". */
   refreshHost: () => Promise<void>;
+  /** Resolves when no change is waiting for the host (tests, and before a refresh). */
+  hostSettled: () => Promise<void>;
+  /** Take a linked item off a host task (its attachment id). */
+  detachLinked: (taskId: string, attachmentId: string) => void;
+  /** The host shows its own picker for this family and attaches what was chosen; then ORBIT refreshes. */
+  pickLinked: (family: string, ctx: { planet?: string; system?: string; galaxy?: string }) => Promise<void>;
+  /** Anything else the host does in a dialog of its own (an id from handshake.caps.actions). */
+  hostAction: (id: string, ctx: Record<string, string>) => Promise<boolean>;
   /** Show something on a page of the host's own. */
   openInHost: (target: Open | undefined) => void;
   /** What may be done here (everything when standalone). */
@@ -195,9 +207,12 @@ export interface OrbitState extends Snapshot {
   // tasks
   createTask: (input: Partial<Omit<Task, 'id' | 'createdAt' | 'updatedAt'>> & { projectId: string; title: string }) => Task;
   updateTask: (id: string, patch: Partial<Omit<Task, 'id'>>) => void;
-  deleteTask: (id: string) => void;
+  /** `reason`: for a host task whose caps.reason has `delete`. */
+  deleteTask: (id: string, reason?: string) => void;
   completeTask: (id: string) => void;
   reopenTask: (id: string) => void;
+  /** Host tasks only: done without being done. `reason` when the task's caps.reason has `drop`. */
+  dropTask: (id: string, reason?: string) => void;
 
   // focus
   startFocus: (o: StartOptions) => void;
@@ -289,20 +304,148 @@ export function createOrbitStore(deps: StoreDeps = {}): StoreApi<OrbitState> {
       return undefined;
     };
     /** A refused change: nothing happens, and a toast says why (once, while it is on screen). */
-    const refuse = (text: string) => {
-      if (!get().toasts.some((t) => t.text === text)) get().toast({ text });
+    const refuse = (text: string, open?: Open) => {
+      if (get().toasts.some((t) => t.text === text)) return;
+      get().toast(open && hostApi ? { text, action: { label: can().openLabel, run: () => get().openInHost(open) }, timeout: 8000 } : { text });
     };
     const onlyPosition = (patch: object) => Object.keys(patch).every((k) => k === 'x' || k === 'y');
+    /** Tasks being removed by the host (taken off screen at once, put back if the host refuses). */
+    const removing = new Map<string, { task: Task; index: number }>();
+    const verseOf = () => get().host?.verseId ?? '';
+
+    /* What the writer needs to put a host's answer on screen (src/host/writer.ts). */
+    const hostedWriting = (): HostedWriting => ({
+      abilities: can(),
+      ownerOf,
+      now,
+      onPlacement: (pl: Placement) => set({ placements: [...get().placements.filter((x) => x.id !== pl.id), pl] }),
+      tasks: hostApi?.tasks,
+      onWork: (id: string, row: TaskWork | null) => set({ taskWork: [...get().taskWork.filter((w) => w.id !== id), ...(row ? [row] : [])] }),
+      current: (id) => get().tasks.find((t) => t.id === id),
+      revise: (id, patch) => set({ tasks: get().tasks.map((t) => (t.id === id ? { ...t, ...patch } : t)) }),
+      refused: (reason) => get().toast({ tone: 'danger', text: reason, timeout: 8000 }),
+      adopt: (id, planet, settled) => {
+        const cur = get().tasks.find((t) => t.id === id);
+        if (!cur?.host) return;
+        set({ tasks: get().tasks.map((t) => (t.id === id ? merged(cur, planet, settled) : t)) });
+        setMoons(id, planet);
+      },
+      created: (tempId, planet, settled) => {
+        const cur = get().tasks.find((t) => t.id === tempId);
+        const id = planet.id;
+        const base = cur ?? planetToTask(verseOf(), planet);
+        const next = { ...merged({ ...base, id }, planet, settled), id };
+        set({ tasks: cur ? get().tasks.map((t) => (t.id === tempId ? next : t)) : get().tasks });
+        // deleted while the host was creating it: the removal that follows is about the host's id
+        const r = removing.get(tempId);
+        if (r) {
+          removing.delete(tempId);
+          removing.set(id, { ...r, task: { ...r.task, id, host: next.host } });
+        }
+        setMoons(id, planet);
+        repoint(tempId, id);
+      },
+      createRefused: (tempId, reason) => {
+        set({ tasks: get().tasks.filter((t) => t.id !== tempId) });
+        forget(tempId);
+        const sorted = get().captures.filter((c) => c.sortedTaskId === tempId);
+        for (const c of sorted) patchRow('captures', c.id, { status: 'inbox', sortedTaskId: null });
+        get().toast({ tone: 'danger', text: reason, timeout: 8000 });
+      },
+      removed: (id) => {
+        removing.delete(id);
+        set({ tasks: get().tasks.filter((t) => t.id !== id) });
+        forget(id);
+      },
+      removeRefused: (id, reason) => {
+        const r = removing.get(id);
+        removing.delete(id);
+        if (r && !get().tasks.some((t) => t.id === id)) {
+          const tasks = get().tasks.slice();
+          tasks.splice(Math.min(r.index, tasks.length), 0, r.task);
+          set({ tasks });
+        }
+        get().toast({ tone: 'danger', text: reason, timeout: 8000 });
+      },
+    });
+
+    /** A task with what the host returned merged in: the host's fields when nothing newer is waiting. */
+    const merged = (cur: Task, planet: Planet, settled: boolean): Task => {
+      const fresh = planetToTask(cur.host?.verse ?? verseOf(), planet);
+      if (!settled) return { ...cur, host: fresh.host };
+      const done = fresh.status === 'done';
+      const known = get().projects.some((p) => p.id === fresh.projectId);
+      return {
+        ...cur,
+        title: fresh.title,
+        notes: fresh.notes,
+        priority: fresh.priority,
+        due: fresh.due,
+        projectId: known ? fresh.projectId : cur.projectId,
+        status: done ? 'done' : cur.status === 'parked' ? 'parked' : 'todo',
+        completedAt: done ? (cur.completedAt ?? fresh.completedAt) : null,
+        parkedAt: done ? null : cur.parkedAt,
+        progress: done ? 100 : cur.progress,
+        updatedAt: Math.max(cur.updatedAt, fresh.updatedAt),
+        host: fresh.host,
+      };
+    };
+    const setMoons = (id: string, planet: Planet) => {
+      const h = get().host;
+      if (!h || (!planet.attachments && planet.more === undefined)) return;
+      const attachments = { ...h.attachments };
+      if (planet.attachments?.length || planet.more) attachments[id] = { items: planet.attachments ?? [], more: planet.more ?? 0 };
+      else delete attachments[id];
+      set({ host: { ...h, attachments } });
+    };
+    /** A task the host created replaces the one shown under a temporary id: everything that pointed at it moves. */
+    const repoint = (from: string, to: string) => {
+      const move = <R extends { id: string; taskId: string | null }>(table: 'checkpoints' | 'sessions' | 'dayItems') => {
+        const rows = get()[table] as unknown as R[];
+        const moved = rows.filter((r) => r.taskId === from).map((r) => ({ ...r, taskId: to }));
+        if (!moved.length) return;
+        set({ [table]: rows.map((r) => moved.find((m) => m.id === r.id) ?? r) } as unknown as Partial<OrbitState>);
+        putMany(table, moved);
+      };
+      move('checkpoints');
+      move('sessions');
+      move('dayItems');
+      for (const c of get().captures.filter((c) => c.sortedTaskId === from || c.contextTaskId === from))
+        patchRow('captures', c.id, { sortedTaskId: c.sortedTaskId === from ? to : c.sortedTaskId, contextTaskId: c.contextTaskId === from ? to : c.contextTaskId });
+      for (const t of get().tasks.filter((t) => t.dependsOn.includes(from))) patchRow('tasks', t.id, { dependsOn: t.dependsOn.map((d) => (d === from ? to : d)) });
+      const rt = get().focus;
+      if (rt?.taskId === from) setFocusRt({ ...rt, taskId: to });
+      const st = get();
+      set({
+        selection: st.selection?.type === 'task' && st.selection.id === from ? { type: 'task', id: to } : st.selection,
+        park: st.park?.taskId === from ? { ...st.park, taskId: to } : st.park,
+        resumeFor: st.resumeFor === from ? to : st.resumeFor,
+        lastFocusEnd: st.lastFocusEnd?.taskId === from ? { ...st.lastFocusEnd, taskId: to } : st.lastFocusEnd,
+      });
+    };
+    /** What ORBIT kept for a task that is gone (checkpoints, day items, the focus on it, dependencies). */
+    const forget = (id: string) => {
+      if (get().focus?.taskId === id) endSession('stopped');
+      const cps = get().checkpoints.filter((c) => c.taskId === id).map((c) => c.id);
+      const items = get().dayItems.filter((d) => d.taskId === id).map((d) => d.id);
+      set({
+        checkpoints: get().checkpoints.filter((c) => c.taskId !== id),
+        dayItems: get().dayItems.filter((d) => d.taskId !== id),
+        selection: get().selection?.id === id ? null : get().selection,
+        park: get().park?.taskId === id ? null : get().park,
+        resumeFor: get().resumeFor === id ? null : get().resumeFor,
+      });
+      for (const t of get().tasks.filter((t) => t.dependsOn.includes(id))) patchRow('tasks', t.id, { dependsOn: t.dependsOn.filter((d) => d !== id) });
+      del('checkpoints', cps);
+      del('dayItems', items);
+    };
 
     // Every write below goes through this one writer (src/host/writer.ts): the single place that decides
     // where a record goes, and that keeps host-owned records out of storage.
-    const writer = createRecordWriter(() => ({
-      adapter,
-      hosted: hostApi && get().host ? { abilities: can(), ownerOf, now, onPlacement: (pl: Placement) => set({ placements: [...get().placements.filter((x) => x.id !== pl.id), pl] }) } : null,
-    }));
-    const put = (table: TableName, rec: { id: string }) => save(writer.put(table, rec));
+    const writer = createRecordWriter(() => ({ adapter, hosted: hostApi && get().host ? hostedWriting() : null }));
+    const put = (table: TableName, rec: { id: string }, opts?: WriteOptions) => save(writer.put(table, rec, opts));
     const putMany = (table: TableName, recs: { id: string }[]) => save(writer.putMany(table, recs));
-    const del = (table: TableName, ids: string[]) => save(writer.remove(table, ids));
+    const del = (table: TableName, ids: string[], opts?: WriteOptions) => save(writer.remove(table, ids, opts));
     const setFocusRt = (rt: FocusRuntime | null) => {
       set({ focus: rt });
       save(writer.setFocus(rt));
@@ -310,7 +453,7 @@ export function createOrbitStore(deps: StoreDeps = {}): StoreApi<OrbitState> {
 
     const stamp = <R extends { updatedAt: number }>(r: R): R => ({ ...r, updatedAt: now() });
 
-    const patchRow = <K extends TableName>(table: K, id: string, patch: object) => {
+    const patchRow = <K extends TableName>(table: K, id: string, patch: object, opts?: WriteOptions) => {
       const rows = get()[table] as unknown as { id: string; updatedAt: number }[];
       const idx = rows.findIndex((r) => r.id === id);
       if (idx < 0) return null;
@@ -318,7 +461,7 @@ export function createOrbitStore(deps: StoreDeps = {}): StoreApi<OrbitState> {
       const copy = rows.slice();
       copy[idx] = next;
       set({ [table]: copy } as unknown as Partial<OrbitState>);
-      put(table, next);
+      put(table, next, opts);
       return next;
     };
 
@@ -420,7 +563,22 @@ export function createOrbitStore(deps: StoreDeps = {}): StoreApi<OrbitState> {
       const own = <T extends { host?: HostRef }>(rows: T[]) => rows.filter((r) => !r.host);
       const groups = [...own(get().groups), ...ad.groups];
       const projects = [...own(get().projects), ...ad.projects];
-      const tasks = [...own(get().tasks), ...ad.tasks];
+      // ORBIT's working state goes onto the host's tasks; a task with a change still waiting for the host stays
+      // as it is on screen, and one being removed stays off it. Tasks being created (temporary ids) stay too.
+      const work = new Map(get().taskWork.map((w) => [w.id, w]));
+      const onScreen = new Map(get().tasks.filter((t) => t.host).map((t) => [t.id, t]));
+      const stale: TaskWork[] = [];
+      const hostTasks = ad.tasks
+        .filter((t) => !removing.has(t.id))
+        .map((t) => {
+          const shown = onScreen.get(t.id);
+          if (shown && writer.busy(t.id)) return shown;
+          const o = overlayWork(t, work.get(t.id));
+          if (o.stale) stale.push({ ...work.get(t.id)!, parked: false, parkedAt: null, updatedAt: now() });
+          return o.task;
+        });
+      const creating = get().tasks.filter((t) => t.host?.pending);
+      const tasks = [...own(get().tasks), ...hostTasks, ...creating];
       const sel = get().selection;
       const still =
         !sel ||
@@ -434,12 +592,21 @@ export function createOrbitStore(deps: StoreDeps = {}): StoreApi<OrbitState> {
         prefs: ad.deepSpace ? { ...get().prefs, deepSpace: ad.deepSpace } : get().prefs,
         host: { ...get().host!, ...ad.extras, verseId: ad.verseId, rev: ad.rev, error: undefined },
       });
+      writer.seed(hostTasks);
+      // the host says done: a parked flag left from before is cleared
+      if (stale.length) {
+        set({ taskWork: get().taskWork.map((w) => stale.find((x) => x.id === w.id) ?? w) });
+        putMany('taskWork', stale);
+      }
     };
 
     const ensureParkedTaskIsTodo = (taskId: string | null) => {
       if (!taskId) return;
       const task = get().tasks.find((x) => x.id === taskId);
-      if (task && task.status !== 'todo') patchRow('tasks', taskId, { status: 'todo', parkedAt: null, completedAt: null });
+      if (!task || task.status === 'todo') return;
+      // reopening a host's done task is the host's to allow
+      if (task.host && task.status === 'done' && !may(can(), task.host, 'status')) return;
+      patchRow('tasks', taskId, { status: 'todo', parkedAt: null, completedAt: null, ...(task.host ? { host: { ...task.host, dropped: false } } : {}) });
     };
 
     return {
@@ -497,7 +664,7 @@ export function createOrbitStore(deps: StoreDeps = {}): StoreApi<OrbitState> {
           groups: keep('groups', ab.personal),
           projects: keep('projects', ab.personal),
           tasks: keep('tasks', ab.personal),
-          captures: keep('captures', ab.personal),
+          captures: keep('captures', ab.capture),
           checkpoints: keep('checkpoints', ab.work),
           sessions: keep('sessions', ab.work),
           dayItems: keep('dayItems', ab.work),
@@ -523,8 +690,10 @@ export function createOrbitStore(deps: StoreDeps = {}): StoreApi<OrbitState> {
       /* ---------- host ---------- */
 
       refreshHost: async () => {
-        const h = get().host;
-        if (!hostApi || !h) return;
+        if (!hostApi || !get().host) return;
+        // changes still waiting for the host are answered first, so the verse that comes back includes them
+        await writer.idle();
+        const h = get().host!;
         try {
           const v = await hostApi.verse(h.verseId, h.rev || undefined);
           if (isUnchanged(v)) {
@@ -545,6 +714,51 @@ export function createOrbitStore(deps: StoreDeps = {}): StoreApi<OrbitState> {
         }
       },
       abilities: () => can(),
+      hostSettled: () => writer.idle(),
+      detachLinked: (taskId, attachmentId) => {
+        const task = get().tasks.find((t) => t.id === taskId);
+        if (!task?.host) return;
+        if (!may(can(), task.host, 'attach')) return refuse(refusal.kept(can()), task.host.open);
+        const moons = get().host?.attachments[taskId];
+        const a = moons?.items.find((x) => x.id === attachmentId);
+        if (!moons || !a?.link) return;
+        // off the screen at once; back if the host refuses
+        const without = (h: HostSlice) => ({ ...h.attachments, [taskId]: { ...moons, items: (h.attachments[taskId]?.items ?? []).filter((x) => x.id !== attachmentId) } });
+        set({ host: { ...get().host!, attachments: without(get().host!) } });
+        void writer.detach(taskId, a.link).then(async (ok) => {
+          if (ok) return get().refreshHost();
+          const h = get().host;
+          if (!h) return;
+          const cur = h.attachments[taskId] ?? { items: [], more: moons.more };
+          if (!cur.items.some((x) => x.id === a.id)) {
+            const items = cur.items.slice();
+            items.splice(Math.min(moons.items.indexOf(a), items.length), 0, a);
+            set({ host: { ...h, attachments: { ...h.attachments, [taskId]: { ...cur, items } } } });
+          }
+        });
+      },
+      pickLinked: async (family, pickCtx) => {
+        if (!hostApi?.pick) return;
+        const task = pickCtx.planet ? get().tasks.find((t) => t.id === pickCtx.planet) : undefined;
+        if (task?.host && !may(can(), task.host, 'attach')) return refuse(refusal.kept(can()), task.host.open);
+        try {
+          const changed = await hostApi.pick(family, pickCtx);
+          if (changed) await get().refreshHost();
+        } catch (e) {
+          get().toast({ tone: 'danger', text: `${can().name}: ${e instanceof Error ? e.message : String(e)}`, timeout: 8000 });
+        }
+      },
+      hostAction: async (id, actionCtx) => {
+        if (!hostApi?.action) return false;
+        try {
+          const changed = await hostApi.action(id, actionCtx);
+          if (changed) await get().refreshHost();
+          return !!changed;
+        } catch (e) {
+          get().toast({ tone: 'danger', text: `${can().name}: ${e instanceof Error ? e.message : String(e)}`, timeout: 8000 });
+          return false;
+        }
+      },
 
       /* ---------- navigation & UI ---------- */
 
@@ -560,7 +774,7 @@ export function createOrbitStore(deps: StoreDeps = {}): StoreApi<OrbitState> {
       dismissToast: (id) => set({ toasts: get().toasts.filter((t) => t.id !== id) }),
       confirm: (confirmReq) => set({ confirmReq }),
       setCaptureOpen: (captureOpen) => {
-        if (captureOpen && !can().personal) return refuse(refusal.personal(can()));
+        if (captureOpen && !can().capture) return refuse(refusal.personal(can()));
         set({ captureOpen });
       },
       setSearchOpen: (searchOpen) => set({ searchOpen }),
@@ -597,11 +811,13 @@ export function createOrbitStore(deps: StoreDeps = {}): StoreApi<OrbitState> {
       updateGroup: (id, patch) => {
         const ref = ownerOf('groups', id);
         // Where a host galaxy sits is ORBIT's to remember (a placement); anything else is the host's.
-        if (ref && !(onlyPosition(patch) || may(can(), ref, 'edit'))) return refuse(refusal.kept(can()));
+        if (ref && !onlyPosition(patch)) return refuse(refusal.kept(can()), ref.open);
         patchRow('groups', id, patch);
       },
       deleteGroup: (id) => {
-        if (ownerOf('groups', id)) return refuse(refusal.kept(can()));
+        const ref = ownerOf('groups', id);
+        // never deleted from ORBIT, and its systems' tasks are never touched
+        if (ref) return refuse(refusal.remove(can()), ref.open);
         const gone = get().groups.find((g) => g.id === id);
         const members = get().projects.filter((p) => p.groupId === id);
         let affected: Project[];
@@ -697,10 +913,16 @@ export function createOrbitStore(deps: StoreDeps = {}): StoreApi<OrbitState> {
         if (cur?.host) {
           // A host system may be dragged to a new place in its own galaxy; moving it to another galaxy, or
           // changing anything else about it, is the host's.
-          if ('groupId' in patch && patch.groupId !== cur.groupId && !may(can(), cur.host, 'move')) return refuse(refusal.move(can()));
+          if ('groupId' in patch && patch.groupId !== cur.groupId) {
+            const into = patch.groupId ? get().groups.find((g) => g.id === patch.groupId) : undefined;
+            return refuse(into && !into.host ? refusal.boundary(can()) : refusal.move(can()), cur.host.open);
+          }
           const rest: Partial<Project> = { ...patch };
-          if (rest.groupId === cur.groupId) delete rest.groupId;
-          if (!onlyPosition(rest) && !may(can(), cur.host, 'edit')) return refuse(refusal.kept(can()));
+          delete rest.groupId;
+          if (!onlyPosition(rest)) return refuse(refusal.kept(can()), cur.host.open);
+        } else if (cur && patch.groupId && ownerOf('groups', patch.groupId)) {
+          // one of ORBIT's own systems dragged into a host's galaxy
+          return refuse(refusal.boundary(can()));
         }
         if (cur && 'groupId' in patch && patch.groupId !== cur.groupId && !patch.groupId) claimDeepSpace(id);
         if (cur && 'groupId' in patch && patch.groupId !== cur.groupId && patch.x === undefined && patch.y === undefined) {
@@ -728,7 +950,9 @@ export function createOrbitStore(deps: StoreDeps = {}): StoreApi<OrbitState> {
         put('placements', pl);
       },
       deleteProject: (id) => {
-        if (ownerOf('projects', id)) return refuse(refusal.kept(can()));
+        const ref = ownerOf('projects', id);
+        // never deleted from ORBIT, and its tasks are never touched
+        if (ref) return refuse(refusal.remove(can()), ref.open);
         const taskIds = get()
           .tasks.filter((t) => t.projectId === id)
           .map((t) => t.id);
@@ -778,21 +1002,56 @@ export function createOrbitStore(deps: StoreDeps = {}): StoreApi<OrbitState> {
         };
         if (refused) {
           // Refused: the task it would have made is returned but is not in the store.
-          refuse(into?.host ? refusal.kept(can()) : refusal.personal(can()));
+          refuse(into?.host ? refusal.kept(can()) : refusal.personal(can()), into?.host?.open);
           return task;
+        }
+        if (into?.host) {
+          // Shown at once under a temporary id; the writer asks the host to create it and swaps in the host's id.
+          task.id = `tmp-${uid()}`;
+          // Until the host answers, it may be changed like any task it accepts (changes wait for the answer);
+          // the host's own caps for it arrive with the answer.
+          task.host = { id: task.id, kind: 'task', verse: into.host.verse, caps: { edit: true, status: true, delete: true }, pending: true };
         }
         set({ tasks: [...get().tasks, task] });
         put('tasks', task);
         return task;
       },
       updateTask: (id, patch) => {
-        const ref = ownerOf('tasks', id);
-        if (ref && (!may(can(), ref, 'edit'))) return refuse(refusal.kept(can()));
+        const cur = get().tasks.find((t) => t.id === id);
+        const ref = cur?.host;
+        const moving = !!cur && 'projectId' in patch && patch.projectId !== cur.projectId;
+        const target = moving ? get().projects.find((p) => p.id === patch.projectId) : undefined;
+        if (!ref) {
+          if (moving && target?.host) return refuse(refusal.boundary(can()));
+          patchRow('tasks', id, patch);
+          return;
+        }
+        const keys = Object.keys(patch).filter((k) => k !== 'projectId' || moving);
+        const has = (list: readonly string[]) => keys.some((k) => list.includes(k));
+        if (has(HOST_FIELDS) && !may(can(), ref, 'edit')) return refuse(refusal.kept(can()), ref.open);
+        if (moving) {
+          if (!target?.host) return refuse(refusal.boundary(can()));
+          if (!may(can(), ref, 'move')) return refuse(refusal.kept(can()), ref.open);
+          if (!may(can(), target.host, 'create')) return refuse(refusal.target(can()));
+        }
+        if ('status' in patch && patch.status !== cur.status && (patch.status === 'parked' || cur.status === 'parked' ? !can().work : !may(can(), ref, 'status')))
+          return refuse(refusal.kept(can()), ref.open);
+        if (has(WORK_FIELDS) && !can().work) return refuse(refusal.work(can()));
         patchRow('tasks', id, patch);
       },
-      deleteTask: (id) => {
-        const ref = ownerOf('tasks', id);
-        if (ref && (!may(can(), ref, 'delete'))) return refuse(refusal.kept(can()));
+      deleteTask: (id, reason) => {
+        const task = get().tasks.find((t) => t.id === id);
+        const ref = task?.host;
+        if (task && ref) {
+          if (!may(can(), ref, 'delete')) return refuse(refusal.remove(can()), ref.open);
+          if (needsReason(ref, 'delete') && !reason?.trim()) return refuse(refusal.reason(can(), 'delete'));
+          // Off the screen at once. What ORBIT kept for it is cleaned up only once the host has removed it
+          // (writer → removed); if the host refuses, the task comes back (removeRefused).
+          removing.set(id, { task, index: get().tasks.indexOf(task) });
+          set({ tasks: get().tasks.filter((t) => t.id !== id), selection: get().selection?.id === id ? null : get().selection });
+          del('tasks', [id], { reason: reason?.trim() ?? '' });
+          return;
+        }
         if (get().focus?.taskId === id) endSession('stopped');
         const cps = get().checkpoints.filter((c) => c.taskId === id).map((c) => c.id);
         const items = get().dayItems.filter((d) => d.taskId === id).map((d) => d.id);
@@ -815,9 +1074,9 @@ export function createOrbitStore(deps: StoreDeps = {}): StoreApi<OrbitState> {
       completeTask: (id) => {
         const task = get().tasks.find((t) => t.id === id);
         if (!task) return;
-        if (task.host && (!may(can(), task.host, 'status'))) return refuse(refusal.kept(can()));
+        if (task.host && !may(can(), task.host, 'status')) return refuse(refusal.kept(can()), task.host.open);
         if (get().focus?.taskId === id) endSession('completed');
-        patchRow('tasks', id, { status: 'done', completedAt: now(), parkedAt: null, progress: 100 });
+        patchRow('tasks', id, { status: 'done', completedAt: now(), parkedAt: null, progress: 100, ...(task.host ? { host: { ...task.host, dropped: false } } : {}) });
         get().toast({
           tone: 'success',
           text: `Completed “${task.title}”.`,
@@ -826,8 +1085,17 @@ export function createOrbitStore(deps: StoreDeps = {}): StoreApi<OrbitState> {
       },
       reopenTask: (id) => {
         const ref = ownerOf('tasks', id);
-        if (ref && (!may(can(), ref, 'status'))) return refuse(refusal.kept(can()));
-        patchRow('tasks', id, { status: 'todo', completedAt: null });
+        if (ref && !may(can(), ref, 'status')) return refuse(refusal.kept(can()), ref.open);
+        patchRow('tasks', id, { status: 'todo', completedAt: null, ...(ref ? { host: { ...ref, dropped: false } } : {}) });
+      },
+      dropTask: (id, reason) => {
+        const task = get().tasks.find((t) => t.id === id);
+        if (!task?.host) return;
+        if (!may(can(), task.host, 'status')) return refuse(refusal.kept(can()), task.host.open);
+        if (needsReason(task.host, 'drop') && !reason?.trim()) return refuse(refusal.reason(can(), 'drop'));
+        if (get().focus?.taskId === id) endSession('stopped');
+        patchRow('tasks', id, { status: 'done', completedAt: now(), parkedAt: null, host: { ...task.host, dropped: true } }, { reason: reason?.trim() || undefined });
+        get().toast({ text: `Dropped “${task.title}”.`, action: { label: 'Undo', run: () => get().reopenTask(id) } });
       },
 
       /* ---------- focus ---------- */
@@ -965,7 +1233,7 @@ export function createOrbitStore(deps: StoreDeps = {}): StoreApi<OrbitState> {
 
       addCapture: (input) => {
         const t = now();
-        if (!can().personal) {
+        if (!can().capture) {
           // Refused: the capture it would have made is returned but is not in the store.
           refuse(refusal.personal(can()));
           return { id: uid(), createdAt: t, updatedAt: t, text: input.text, kind: input.kind ?? 'task', source: input.source ?? 'quick', status: 'inbox', contextTaskId: null, sortedTaskId: null };
@@ -994,6 +1262,7 @@ export function createOrbitStore(deps: StoreDeps = {}): StoreApi<OrbitState> {
           return null;
         }
         const task = get().createTask({ projectId: opts.projectId, title: opts.title ?? c.text });
+        if (!get().tasks.some((t) => t.id === task.id)) return null; // refused (and said why)
         patchRow('captures', id, { status: 'sorted', sortedTaskId: task.id });
         if (opts.slot) get().planTask(task.id, toDateKey(now()), opts.slot);
         return task;
@@ -1067,7 +1336,7 @@ export function createOrbitStore(deps: StoreDeps = {}): StoreApi<OrbitState> {
       setPrefs: (patch) => {
         const prefs = { ...get().prefs, ...patch, updatedAt: now() };
         set({ prefs });
-        save(adapter.setPrefs(prefs));
+        save(writer.setPrefs(prefs));
       },
       setNextContext: ({ energy, minutes }) => {
         get().setPrefs({ ...(energy ? { nextEnergy: energy } : {}), ...(minutes ? { nextMinutes: minutes } : {}) });
@@ -1169,7 +1438,7 @@ export function createOrbitStore(deps: StoreDeps = {}): StoreApi<OrbitState> {
 /** Views that make sense with what the host provides (all of them when standalone). */
 export function viewAvailable(a: HostAbilities, v: ViewName): boolean {
   if (v === 'today') return a.work;
-  if (v === 'inbox') return a.personal;
+  if (v === 'inbox') return a.capture;
   return true;
 }
 
