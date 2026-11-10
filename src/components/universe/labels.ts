@@ -110,7 +110,13 @@ export interface OrbitLabelInput {
   rank: number;
   /** Always shown (the selected planet). */
   force?: boolean;
+  /** A small pill under the name ("2 changed"): it takes a line of its own, so no other name covers it. */
+  pill?: string;
 }
+
+/** The height of a label's pill line (px), and the room its glyph and padding take beside its words. */
+export const PILL_H = 17;
+export const PILL_PAD = 24;
 
 export type LabelSide = 'right' | 'left' | 'above' | 'below';
 
@@ -120,6 +126,8 @@ export interface OrbitLabel {
   side: LabelSide;
   rect: Rect;
   lines: string[];
+  /** The pill's words, when the planet has one (its box is the last 17px of `rect`). */
+  pill?: string;
 }
 
 export interface OrbitLabelOptions {
@@ -175,8 +183,8 @@ export function placeOrbitLabels(items: OrbitLabelInput[], o: OrbitLabelOptions)
   const out = new Map<string, OrbitLabel>();
   for (const it of order) {
     const lines = wrapLabel(it.text, maxW, o.measure, 2);
-    const w = Math.ceil(Math.max(...lines.map((l) => o.measure(l)), 1));
-    const h = lines.length * lineH;
+    const w = Math.ceil(Math.max(...lines.map((l) => o.measure(l)), it.pill ? o.measure(it.pill) * 0.92 + PILL_PAD : 0, 1));
+    const h = lines.length * lineH + (it.pill ? PILL_H : 0);
     const sides = sidesFor(Math.atan2(it.y - o.cy, it.x - o.cx));
     const free = (r: Rect) =>
       (!o.bounds || inside(r, o.bounds)) &&
@@ -203,7 +211,7 @@ export function placeOrbitLabels(items: OrbitLabelInput[], o: OrbitLabelOptions)
       shown = true;
     }
     if (shown) placed.push(rect);
-    out.set(it.id, { id: it.id, shown, side, rect, lines });
+    out.set(it.id, { id: it.id, shown, side, rect, lines, pill: it.pill });
   }
   return items.map((it) => out.get(it.id)!);
 }

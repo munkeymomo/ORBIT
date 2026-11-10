@@ -19,6 +19,8 @@ export interface GalaxyLabelInput {
   w: number;
   /** It has a chip (one more line). */
   chip: boolean;
+  /** Something in it changed: the short form keeps a line for "n changed" (the full form has it in its counts). */
+  changed?: boolean;
 }
 
 export interface GalaxyLabelSpot extends Rect {
@@ -28,10 +30,10 @@ export interface GalaxyLabelSpot extends Rect {
 }
 
 /** Heights of the label's lines (px), as GalaxyLabel draws them. */
-export const GALAXY_LABEL_H = { name: 36, chip: 24, counts: 18, bar: 12 } as const;
+export const GALAXY_LABEL_H = { name: 36, chip: 24, counts: 18, bar: 12, changed: 22 } as const;
 
-export function galaxyLabelHeight(chip: boolean, brief: boolean) {
-  return GALAXY_LABEL_H.name + (chip ? GALAXY_LABEL_H.chip : 0) + (brief ? 0 : GALAXY_LABEL_H.counts + GALAXY_LABEL_H.bar);
+export function galaxyLabelHeight(chip: boolean, brief: boolean, changed = false) {
+  return GALAXY_LABEL_H.name + (chip ? GALAXY_LABEL_H.chip : 0) + (brief ? (changed ? GALAXY_LABEL_H.changed : 0) : GALAXY_LABEL_H.counts + GALAXY_LABEL_H.bar);
 }
 
 /** How far from the centre the label's near edge is (as before: inside the disk's lower part for big galaxies). */
@@ -47,7 +49,7 @@ export function placeGalaxyLabels(items: GalaxyLabelInput[], bounds: { w: number
   for (const it of order) {
     const gap = galaxyLabelGap(it.sr);
     const make = (side: GalaxyLabelSpot['side'], brief: boolean): GalaxyLabelSpot => {
-      const h = galaxyLabelHeight(it.chip, brief);
+      const h = galaxyLabelHeight(it.chip, brief, !!it.changed);
       if (side === 'right' || side === 'left') {
         const x = side === 'right' ? it.cx + it.sr * 0.8 + 6 : it.cx - it.sr * 0.8 - 6 - it.w;
         return { x, y: it.cy - h / 2, w: it.w, h, brief, side };

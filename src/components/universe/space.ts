@@ -103,6 +103,9 @@ export interface GalaxyPlace {
   overdue: number;
   /** Items its systems stand for (never counted as tasks). */
   items: number;
+  /** Changed moons in its systems (planets marked: `changedPlanets`). */
+  changed: number;
+  changedPlanets: number;
   matches: boolean;
   hasActive: boolean;
   /** Beacons on the galaxy's rim. */
@@ -186,6 +189,8 @@ export function buildSpace(
       parked: sum((s) => s.pv.stats.parked),
       overdue: sum((s) => s.pv.stats.overdue),
       items: sum((s) => s.pv.itemCount ?? 0),
+      changed: sum((s) => s.pv.changed?.moons ?? 0),
+      changedPlanets: sum((s) => s.pv.changed?.planets.length ?? 0),
       matches: !filterOn || systems.some((s) => s.pv.matches),
       hasActive: systems.some((s) => s.pv.hasActive),
       beacons: group ? (beaconsOfGalaxy.get(group.id) ?? []) : [],

@@ -283,6 +283,7 @@ export function SpacePainter({
             g.arc(sx, sy, pr * 2.6, 0, Math.PI * 2);
             g.stroke();
           }
+          if (s.pv.changed.moons > 0) drawChangedTag(g, sx + pr * 2.2 + 3, sy - pr * 2.2 - 3, sDim);
           continue;
         }
 
@@ -315,6 +316,7 @@ export function SpacePainter({
               g.beginPath();
               g.arc(px, py, Math.max(1.4, (sl.d / 2) * k), 0, Math.PI * 2);
               g.fill();
+              if (tv.changed > 0 && t.status !== 'done') drawChangedRim(g, px, py, Math.max(1.4, (sl.d / 2) * k) + 2.4, orbitA * sDim);
             });
             const nt = s.pv.tasks.length;
             (s.pv.items ?? []).forEach((iv, j) => {
@@ -333,6 +335,7 @@ export function SpacePainter({
                 g.lineWidth = 1;
                 g.stroke();
               }
+              if (iv.changed > 0) drawChangedRim(g, sx + sl.x * k, sy + sl.y * k, r + 2.4, orbitA * sDim);
             });
             g.globalAlpha = 1;
           }
@@ -684,6 +687,39 @@ function drawBeacon(g: CanvasRenderingContext2D, b: Beacon, x: number, y: number
   text(g, `${name} · ${when}${label === 'full' ? serves : ''}`, x + 10, y, { color: col, size: 11, weight: 600, alpha: alpha * (b.state === 'rescoped' ? 0.8 : 1) });
 }
 
+/**
+ * "Something changed": a red notch on a planet's rim (a short arc at its top, solid, never pulsing: overdue is a whole
+ * glowing ring), and, on a star seen from afar, a small red square tag (overdue is a solid round badge; a date is a
+ * diamond). Shape is what tells them apart, not the red.
+ */
+function drawChangedRim(g: CanvasRenderingContext2D, x: number, y: number, r: number, alpha: number) {
+  g.save();
+  g.globalAlpha = clamp(alpha, 0, 1);
+  g.strokeStyle = SPACE.danger;
+  g.lineWidth = 2.8;
+  g.lineCap = 'round';
+  g.shadowColor = SPACE.danger;
+  g.shadowBlur = 6;
+  g.beginPath();
+  g.arc(x, y, r, -Math.PI / 2 - 0.95, -Math.PI / 2 + 0.95);
+  g.stroke();
+  g.restore();
+}
+
+function drawChangedTag(g: CanvasRenderingContext2D, x: number, y: number, alpha: number) {
+  g.save();
+  g.globalAlpha = clamp(alpha, 0, 1);
+  g.fillStyle = '#0a0c16';
+  g.strokeStyle = SPACE.danger;
+  g.lineWidth = 1.5;
+  g.shadowColor = SPACE.danger;
+  g.shadowBlur = 8;
+  roundRect(g, x - 4, y - 4, 8, 8, 1.5);
+  g.fill();
+  g.stroke();
+  g.restore();
+}
+
 /** The direction (radians, screen) away from a label on this side of its planet. */
 const AWAY: Record<LabelSide, number> = { right: Math.PI, left: 0, above: Math.PI / 2, below: -Math.PI / 2 };
 
@@ -895,9 +931,11 @@ function drawBusyRing(g: CanvasRenderingContext2D, s: SystemPlace, sx: number, s
         g.lineWidth = 1;
         g.stroke();
       }
+      if (iv.changed > 0) drawChangedRim(g, sx + Math.cos(a) * R, sy + Math.sin(a) * R, dot + 2.6, alpha * (iv.matches ? 1 : 0.3));
     });
     g.restore();
     if (detail) text(g, `${s.pv.itemCount} items · too many to draw one by one · listed in its panel`, sx, sy + R + 18, { color: '#c9d2ee', size: 11.5, weight: 600, align: 'center', alpha });
+    if (detail && s.pv.changed.moons) text(g, `${s.pv.changed.moons} changed`, sx, sy + R + 34, { color: SPACE.danger, size: 11.5, weight: 600, align: 'center', alpha });
     return;
   }
   const open = s.pv.tasks.filter((t) => t.task.status !== 'done');
@@ -913,7 +951,9 @@ function drawBusyRing(g: CanvasRenderingContext2D, s: SystemPlace, sx: number, s
     g.beginPath();
     g.arc(sx + Math.cos(a) * R, sy + Math.sin(a) * R, dot, 0, Math.PI * 2);
     g.fill();
+    if (tv.changed > 0) drawChangedRim(g, sx + Math.cos(a) * R, sy + Math.sin(a) * R, dot + 2.6, alpha * (tv.matches ? 1 : 0.3));
   });
   g.restore();
   if (detail) text(g, `${s.pv.stats.open} open tasks · too many to draw one by one`, sx, sy + R + 18, { color: '#c9d2ee', size: 11.5, weight: 600, align: 'center', alpha });
+  if (detail && s.pv.changed.moons) text(g, `${s.pv.changed.moons} changed`, sx, sy + R + 34, { color: SPACE.danger, size: 11.5, weight: 600, align: 'center', alpha });
 }

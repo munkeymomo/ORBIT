@@ -11,6 +11,8 @@ import { ProjectGlyph, PRIORITY_META } from '../ui/visuals';
 import { filterActive, useUniverseModel, type ItemView, type TaskView } from './model';
 import { useAbilities } from '../../host/useAbilities';
 import type { MoonSet } from '../../host/adapt';
+import { ChangedBadge, ChangedPill, ChangedRim, NotEqual } from './ChangedMark';
+import { changedText } from '../../host/changed';
 import type { Also, Arrow, Beacon, Family } from '../../host/types';
 import { verseSwitch } from '../../host/verses';
 import { arrowCurves, curveLabelPoint, planetSpots, starBoxes } from './arrows';
@@ -737,10 +739,10 @@ export function UniverseCanvas({ onNewSystem, onNewGalaxy }: { onNewSystem: (gal
         ? placeGalaxyLabels(
             galaxies.map((g) => {
               const [cx, cy] = [g.x * view.k + view.x, g.y * view.k + view.y];
-              const counts = galaxyCountText(g) + (g.overdue ? ` · ${g.overdue} overdue` : '');
+              const counts = galaxyCountText(g) + (g.overdue ? ` · ${g.overdue} overdue` : '') + (g.changed ? ` · ≠ ${changedText(g.changed)}` : '');
               const own = isYours(can.hosted, g);
               const chipW = g.host?.chip ? measureLabel(g.host.chip) + 40 : own ? 80 : 0;
-              return { id: g.id, cx, cy, sr: g.r * view.k, w: Math.max(150, measureGalaxyName(g.name) + 34, measureLabel(counts) + 34, chipW), chip: !!g.host?.chip || own };
+              return { id: g.id, cx, cy, sr: g.r * view.k, w: Math.max(150, measureGalaxyName(g.name) + 34, measureLabel(counts) + 34, chipW), chip: !!g.host?.chip || own, changed: g.changed > 0 };
             }),
             { w: size.w, h: size.h, top: size.top ?? 76 },
           )
@@ -822,8 +824,8 @@ export function UniverseCanvas({ onNewSystem, onNewGalaxy }: { onNewSystem: (gal
             // a galaxy fitted closer than its whole disc has its rim above the view: its name stays under the toolbar
             const labelBottom = (cyy: number, srr: number) => Math.max(cyy - srr - 6, (size.top ?? 76) + 48);
             // its words never show through the minimap or the zoom control (nor the toolbar's row)
-            const lw = Math.max(universe ? 150 : 90, measureGalaxyName(g.name) + 34, measureLabel(galaxyCountText(g)) + 34, g.host?.chip ? measureLabel(g.host.chip) + 40 : 0);
-            const lh = universe ? galaxyLabelHeight(!!g.host?.chip || isYours(can.hosted, g), !!spot?.brief) : 44;
+            const lw = Math.max(universe ? 150 : 90, measureGalaxyName(g.name) + 34, measureLabel(galaxyCountText(g) + (g.changed ? ` · ≠ ${changedText(g.changed)}` : '')) + 34, g.host?.chip ? measureLabel(g.host.chip) + 40 : 0);
+            const lh = universe ? galaxyLabelHeight(!!g.host?.chip || isYours(can.hosted, g), !!spot?.brief, g.changed > 0) : 44;
             const lx = universe && spot ? (spot.side === 'left' ? spot.x + spot.w - lw : spot.side === 'right' ? spot.x : spot.x + spot.w / 2 - lw / 2) : cx - lw / 2;
             const ly = universe ? (spot?.y ?? cy + Math.min(sr * 0.92, sr * 0.5 + 70)) : labelBottom(cy, sr) - lh;
             const under = ui.some((r) => overlaps({ x: lx, y: ly, w: lw, h: lh }, r));
@@ -923,7 +925,9 @@ export function UniverseCanvas({ onNewSystem, onNewGalaxy }: { onNewSystem: (gal
               return (
                 <button
                   key={`h-${s.pv.project.id}`}
-                  aria-label={`${name} in ${g.name}. Click to fly to this system; drag onto another galaxy to move it.`}
+                  aria-label={`${name} in ${g.name}.${s.pv.changed.moons ? ` ${changedText(s.pv.changed.moons)}.` : ''} Click to fly to this system; drag onto another galaxy to move it.`}
+                  data-system={s.pv.project.id}
+                  data-changed={s.pv.changed.moons || undefined}
                   title={`${name} — click to fly in, drag onto another galaxy to move it`}
                   onPointerDown={(e) => startDrag(e, 'system', s.pv.project.id, s.x, s.y, g.id)}
                   onClick={() => !suppressClick.current && flyTo({ kind: 'system', id: s.pv.project.id })}
@@ -976,7 +980,7 @@ export function UniverseCanvas({ onNewSystem, onNewGalaxy }: { onNewSystem: (gal
                     label={skyWords.planets.get(tv.task.id)}
                     selected={selection?.type === 'task' && selection.id === tv.task.id}
                     away={!!ctx.system && ctx.system.pv.project.id !== s.pv.project.id}
-                    dimmed={dim && (!s.pv.matches || ((!!query || !!filter.uses) && !tv.matches))}
+                    dimmed={dim && (!s.pv.matches || ((!!query || !!filter.uses || filter.hasChanged) && !tv.matches))}
                     onClick={() => onPlanetClick(s, tv.task.id)}
                     onHover={(on) => setHovered(on ? tv.task.id : null)}
                   />
@@ -999,7 +1003,7 @@ export function UniverseCanvas({ onNewSystem, onNewGalaxy }: { onNewSystem: (gal
                     label={skyWords.planets.get(iv.item.id)}
                     selected={selection?.type === 'item' && selection.id === iv.item.id}
                     away={!!ctx.system && ctx.system.pv.project.id !== s.pv.project.id}
-                    dimmed={dim && (!s.pv.matches || (!!query && !iv.matches))}
+                    dimmed={dim && (!s.pv.matches || ((!!query || filter.hasChanged) && !iv.matches))}
                     onClick={() => onItemClick(s, iv.item.id)}
                     onHover={(on) => setHovered(on ? iv.item.id : null)}
                   />,
@@ -1348,10 +1352,12 @@ function GalaxyLabel({
   const auto = beside === 'left' ? 'ml-auto' : beside === 'right' ? 'mr-auto' : 'mx-auto';
   const pct = g.total ? Math.round((g.done / g.total) * 100) : 0;
   const counts = galaxyCountText(g);
-  const label = `${g.name} galaxy: ${counts}.${g.overdue ? ` ${g.overdue} overdue.` : ''}${inside && !g.virtual ? ' Open details.' : ' Fly in.'}`;
+  const label = `${g.name} galaxy: ${counts}.${g.overdue ? ` ${g.overdue} overdue.` : ''}${g.changed ? ` ${changedText(g.changed)}.` : ''}${inside && !g.virtual ? ' Open details.' : ' Fly in.'}`;
   return (
     <button
       aria-label={label}
+      data-galaxy={g.id}
+      data-changed={g.changed || undefined}
       title={g.virtual ? 'Projects without a galaxy — drag to move' : `${g.name}${brief ? ` (${counts})` : ''} — click to ${inside ? 'see details' : 'fly in'}, drag to move`}
       onPointerDown={onPointerDown}
       onClick={onClick}
@@ -1379,11 +1385,18 @@ function GalaxyLabel({
           Yours
         </span>
       )}
+      {!compact && brief && g.changed > 0 && <ChangedPill n={g.changed} hook="data-galaxy-changed" className={cx(auto, 'mt-1 flex w-max')} />}
       {!compact && !brief && (
         <>
           <span className="tabular mt-0.5 block text-[12px] whitespace-nowrap text-muted [text-shadow:0_1px_8px_rgba(0,0,0,.9)]">
             {counts}
             {g.overdue > 0 && <span className="text-danger"> · {g.overdue} overdue</span>}
+            {g.changed > 0 && (
+              <span className="text-danger" data-galaxy-changed={g.changed}>
+                {' · '}
+                <NotEqual size={10} /> {changedText(g.changed)}
+              </span>
+            )}
           </span>
           {g.total > 0 && (
             <span className={cx(auto, 'mt-1.5 block h-1 w-24 overflow-hidden rounded-full bg-white/10')}>
@@ -1437,6 +1450,7 @@ function StarNode({
   onClick: () => void;
 }) {
   const { project, stats } = s.pv;
+  const changed = s.pv.changed.moons;
   const hex = colorHex(project.color);
   const rs = clamp(s.pv.radius * k, 9, 66);
   const ring = rs + 6;
@@ -1445,7 +1459,7 @@ function StarNode({
   const showMeta = rs >= 15 || k >= 0.5;
   const label = portalTo
     ? `${project.name}: a way ${portalTo}. ${current ? 'Open details.' : 'Fly to it.'}`
-    : `${project.name}. ${stats.total || !s.pv.itemCount ? `${stats.open} open, ${stats.parked} parked, ${stats.done} done, ${pct}% complete.` : ''}${s.pv.itemCount ? ` ${s.pv.itemCount} items.` : ''}${stats.overdue ? ` ${stats.overdue} overdue.` : ''} ${current ? 'Open details.' : 'Fly to this system.'}`;
+    : `${project.name}. ${stats.total || !s.pv.itemCount ? `${stats.open} open, ${stats.parked} parked, ${stats.done} done, ${pct}% complete.` : ''}${s.pv.itemCount ? ` ${s.pv.itemCount} items.` : ''}${stats.overdue ? ` ${stats.overdue} overdue.` : ''}${changed ? ` ${changedText(changed)}.` : ''} ${current ? 'Open details.' : 'Fly to this system.'}`;
   const box = ring * 2 + 8;
   if (portalTo) return <PortalNode s={s} x={x} y={y} rs={rs} label={label} chip={portalTo} selected={selected} current={current} faded={faded || clipped} dimmed={dimmed} dragging={dragging} onPointerDown={onPointerDown} onClick={onClick} onPortal={onPortal} />;
   return (
@@ -1459,6 +1473,8 @@ function StarNode({
       />
       <button
         aria-label={label}
+        data-system={project.id}
+        data-changed={changed || undefined}
         title={`${project.name} — ${current ? 'click for details' : 'click to fly in'}, drag to move`}
         onPointerDown={onPointerDown}
         onClick={onClick}
@@ -1501,6 +1517,7 @@ function StarNode({
             {stats.overdue}
           </span>
         )}
+        {!close && changed > 0 && !portalTo && <ChangedBadge n={changed} small={rs < 15} style={{ right: rs < 15 ? -4 : 0, bottom: rs < 15 ? -2 : 0 }} />}
         {rs >= 15 && !close && stats.parked > 0 && (
           <span className="absolute flex h-5 items-center gap-0.5 rounded-full bg-[#F5B544] px-1.5 text-[10.5px] font-bold text-[#2a1a00] ring-2 ring-[#0a0c12]" style={{ left: 0, top: 0 }} title={`${stats.parked} parked`}>
             <Pause size={9} strokeWidth={3} />
@@ -1522,7 +1539,8 @@ function StarNode({
         ))}
       </div>
       {showMeta && (
-        <div className="tabular truncate text-[11.5px] text-muted [text-shadow:0_0_3px_#000,0_1px_8px_rgba(0,0,0,.95)]">
+        <div className="tabular flex justify-center text-[11.5px] whitespace-nowrap text-muted [text-shadow:0_0_3px_#000,0_1px_8px_rgba(0,0,0,.95)]">
+          <span className="min-w-0 truncate">
           {project.host?.code ? `${project.host.code} · ` : ''}
           {stats.total === 0
             ? s.pv.itemCount
@@ -1532,6 +1550,13 @@ function StarNode({
           {stats.openEffortMin > 0 && ` · ${fmtMinutes(stats.openEffortMin)} left`}
           {close && stats.parked > 0 && <span className="text-amber"> · {stats.parked} parked</span>}
           {close && stats.overdue > 0 && <span className="text-danger"> · {stats.overdue} overdue</span>}
+          </span>
+          {changed > 0 && (
+            <span className="shrink-0 text-danger" data-system-changed={changed}>
+              {'\u00a0· '}
+              {changedText(changed)}
+            </span>
+          )}
         </div>
       )}
     </div>
@@ -1680,15 +1705,17 @@ function ItemNode({
     it.size === 0 ? 'size 0, nothing yet' : null,
     it.ring != null ? `ring ${Math.round(it.ring * 100)}%` : null,
     it.moons.items.length + it.moons.more ? `${it.moons.items.length + it.moons.more} attached` : null,
+    iv.changed > 0 ? changedText(iv.changed) : null,
   ]
     .filter(Boolean)
     .join(' · ');
   return (
     // The pop animation ends at opacity 1 and holds it, so the faintness lives on an inner element.
-    <div className="group/planet anim-pop absolute" data-item={it.id} style={{ left: x, top: y, width: 0, height: 0, zIndex: selected ? 26 : 20 }} onPointerEnter={() => onHover?.(true)} onPointerLeave={() => onHover?.(false)}>
+    <div className="group/planet anim-pop absolute" data-item={it.id} data-changed={iv.changed > 0 ? iv.changed : undefined} style={{ left: x, top: y, width: 0, height: 0, zIndex: selected ? 26 : 20 }} onPointerEnter={() => onHover?.(true)} onPointerLeave={() => onHover?.(false)}>
      <div className="absolute top-0 left-0" data-fade style={{ width: 0, height: 0, opacity: away && !selected ? AWAY_OPACITY : dimmed ? 0.22 : it.ghost ? 0.62 : 1 }}>
       {selected && <SelectedMark r={r + 9} />}
       <button onClick={onClick} onPointerDown={(e) => e.stopPropagation()} aria-label={`${desc}. Open details.`} title={desc} className="group absolute rounded-full outline-none" style={{ left: -r - 2, top: -r - 2, width: 2 * r + 4, height: 2 * r + 4 }}>
+        {iv.changed > 0 && <ChangedRim d={d} n={iv.changed} />}
         {it.ring != null && (
           <svg className="absolute inset-0 -rotate-90 overflow-visible" width={2 * r + 4} height={2 * r + 4} aria-hidden>
             <circle cx={r + 2} cy={r + 2} r={r} fill="none" stroke="rgba(255,255,255,.12)" strokeWidth={2} />
@@ -1735,6 +1762,7 @@ function ItemNode({
               {l}
             </span>
           ))}
+          {label.pill && <ChangedPill n={iv.changed} className="mt-px" />}
         </div>
       )}
      </div>
@@ -1797,6 +1825,7 @@ function PlanetNode({
     task.estimateMin ? `about ${fmtMinutes(task.estimateMin)}` : null,
     task.due && !done ? describeDue(task.due, today).label : null,
     progress > 0 && !done ? `${progress}% done` : null,
+    tv.changed > 0 && !done ? changedText(tv.changed) : null,
   ]
     .filter(Boolean)
     .join(' · ');
@@ -1804,11 +1833,12 @@ function PlanetNode({
   const style: CSSProperties = { left: x, top: y, width: 0, height: 0, zIndex: selected ? 26 : 20 };
   return (
     // opacity on an inner element: the pop animation holds opacity 1 and would override it here
-    <div className="group/planet anim-pop absolute" style={style} onPointerEnter={() => onHover?.(true)} onPointerLeave={() => onHover?.(false)}>
+    <div className="group/planet anim-pop absolute" data-task={task.id} data-changed={tv.changed > 0 && !done ? tv.changed : undefined} style={style} onPointerEnter={() => onHover?.(true)} onPointerLeave={() => onHover?.(false)}>
      <div className="absolute top-0 left-0" data-fade style={{ width: 0, height: 0, opacity: away && !selected ? AWAY_OPACITY : dimmed ? 0.22 : done ? 0.6 : 1 }}>
       {selected && <SelectedMark r={r + 9} />}
       <button onClick={onClick} onPointerDown={(e) => e.stopPropagation()} aria-label={desc} title={desc} className="group absolute rounded-full outline-none" style={{ left: -r - 2, top: -r - 2, width: 2 * r + 4, height: 2 * r + 4 }}>
         {overdue && <span className="anim-pulse absolute rounded-full" style={{ inset: 3, boxShadow: '0 0 0 2px #f2766b, 0 0 14px 2px rgba(242,118,107,.55)' }} />}
+        {tv.changed > 0 && !done && <ChangedRim d={d} n={tv.changed} />}
         <svg className="absolute inset-0 -rotate-90 overflow-visible" width={2 * r + 4} height={2 * r + 4} aria-hidden>
           {parked && <circle cx={r + 2} cy={r + 2} r={r} fill="none" stroke="#f5b544" strokeWidth={1.5} strokeDasharray="3 4" opacity={0.85} />}
           {progress > 0 && !done && <circle cx={r + 2} cy={r + 2} r={r} fill="none" stroke="#2dd4bf" strokeWidth={2.5} strokeLinecap="round" strokeDasharray={C} strokeDashoffset={C * (1 - progress / 100)} />}
@@ -1856,6 +1886,7 @@ function PlanetNode({
               {l}
             </span>
           ))}
+          {label.pill && <ChangedPill n={tv.changed} className="mt-px" />}
         </div>
       )}
      </div>
@@ -1945,12 +1976,13 @@ function FiltersButton({ hosted = false, hasFinished = false, compact = false }:
       document.removeEventListener('keydown', key);
     };
   }, [open]);
-  type Toggle = 'dueSoon' | 'highPriority' | 'parkedOnly' | 'showDone' | 'hasLinked' | 'showFinished';
+  type Toggle = 'dueSoon' | 'highPriority' | 'parkedOnly' | 'showDone' | 'hasLinked' | 'hasChanged' | 'showFinished';
   const rows: [Toggle, string, string][] = [
     ['dueSoon', 'Due soon', 'Overdue or due within 3 days'],
     ['highPriority', 'High priority', 'High and critical only'],
     ...(hosted ? [] : ([['parkedOnly', 'Parked', 'Only tasks with saved context']] as [Toggle, string, string][])),
     ...(hosted ? ([['hasLinked', 'Has linked items', 'Only tasks that use or hold something (moons)']] as [Toggle, string, string][]) : []),
+    ...(hosted ? ([['hasChanged', 'Has something changed', 'Highlight planets with a moon that changed since it was attached']] as [Toggle, string, string][]) : []),
     ['showDone', 'Show done', 'Include completed tasks'],
     ...(hosted && hasFinished ? ([['showFinished', 'Show finished', 'Include galaxies marked finished']] as [Toggle, string, string][]) : []),
   ];
@@ -2064,8 +2096,8 @@ function Minimap({ galaxies, view, size, W, H, onFly, onPan }: { galaxies: Galax
  * for records is listed; the verse's own sentence says what size, colour and ring mean there.
  */
 function Legend({ onClose, hosted = false, hostName = '', verseLegend, recordsOnly = false }: { onClose: () => void; hosted?: boolean; hostName?: string; verseLegend?: string; recordsOnly?: boolean }) {
-  const Row = ({ icon, children }: { icon: React.ReactNode; children: React.ReactNode }) => (
-    <li className="flex items-center gap-3">
+  const Row = ({ icon, children, hook }: { icon: React.ReactNode; children: React.ReactNode; hook?: string }) => (
+    <li className="flex items-center gap-3" data-legend-row={hook}>
       <span className="flex w-8 shrink-0 justify-center">{icon}</span>
       <span>{children}</span>
     </li>
@@ -2076,6 +2108,9 @@ function Legend({ onClose, hosted = false, hostName = '', verseLegend, recordsOn
       {!recordsOnly && <Row icon={<span className="h-5 w-5 rounded-full border border-white/60" />}>Thin solid rim, “Yours” chip: a galaxy of your own, kept with ORBIT.</Row>}
       <Row icon={<span className="flex gap-0.5"><span className="h-2 w-2 rounded-full bg-[#f5b544]" /><span className="h-2 w-2 rounded-full border border-[#4fa3f0]" /></span>}>
         {recordsOnly ? 'Moons: what a record holds or refers to.' : 'Moons: what a task uses.'} Hollow: archived; struck: gone; red: changed since.
+      </Row>
+      <Row icon={<span className="flex items-center gap-1.5"><span className="relative h-4 w-4 rounded-full bg-white/25"><span className="absolute -inset-[3px] rounded-full border-[3px] border-transparent border-t-[#f2766b]" /></span><span className="inline-flex h-4 items-center gap-0.5 rounded-[5px] border-[1.5px] border-danger bg-[#1b0d11] px-0.5 text-danger"><NotEqual size={9} /></span></span>} hook="changed">
+        Red notch on a planet, red “≠” tag on a star: something it holds changed since it was attached. Not the same as overdue (a whole red glow, a round badge). The sky adds up how many are inside each system and galaxy.
       </Row>
       <Row icon={<span className="h-3 w-5 rounded-full border-y-2 border-dotted border-white/50" />}>{recordsOnly ? 'Belt: what a system holds that nothing here uses.' : 'Belt: what a system holds that no task uses.'} Many: a haze with a count.</Row>
       <Row icon={<span className="h-2.5 w-2.5 rotate-45 border-[1.6px] border-white" />}>Diamond: a date. White planned, amber soon, red late, teal achieved, grey rescoped.</Row>

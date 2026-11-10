@@ -25,7 +25,7 @@ import type { UniverseFilter } from '../../src/store/store';
 const NOW = Date.UTC(2026, 10, 10, 9, 0, 0);
 const TODAY = '2026-11-10';
 const measure = (t: string) => t.length * 6;
-const FILTER: UniverseFilter = { query: '', dueSoon: false, highPriority: false, parkedOnly: false, showDone: false, groupId: null, hasLinked: false, uses: null, showFinished: false };
+const FILTER: UniverseFilter = { query: '', dueSoon: false, highPriority: false, parkedOnly: false, showDone: false, groupId: null, hasLinked: false, hasChanged: false, uses: null, showFinished: false };
 
 function sky() {
   const a = adaptVerse(demoVerse(NOW), []);

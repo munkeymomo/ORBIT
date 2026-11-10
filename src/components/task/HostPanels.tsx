@@ -15,6 +15,8 @@ import { projectStats } from '../../store/selectors';
 import { daysBetween, friendlyDay, toDateKey } from '../../lib/util';
 import { Button, IconButton, Input, Menu, SectionTitle, cx } from '../ui/primitives';
 import { DueBadge, PriorityBars, ProgressRing, ProjectChip } from '../ui/visuals';
+import { ChangedSection, useChangedIn, useChangedInGalaxy } from './ChangedSection';
+import { changedText } from '../../host/changed';
 
 /*
  * Panels for records a host owns. They show what the host sent and offer to open it in the host. What can be
@@ -355,6 +357,7 @@ export function HostSystemPanel({ id }: { id: string }) {
   const portalVerse = useOfferedVerses().get(project.host?.portal?.verse ?? '');
   const { select, openInHost, showVerse } = useOrbit.getActions();
   const can = useAbilities();
+  const changed = useChangedIn(id);
   const [showDone, setShowDone] = useState(false);
   const today = toDateKey(Date.now());
   const ref = project.host!;
@@ -399,6 +402,7 @@ export function HostSystemPanel({ id }: { id: string }) {
             </div>
           </div>
         </div>
+        <ChangedSection groups={[{ changed }]} />
         {ref.note && <p className="rounded-xl border border-line bg-surface-2 px-3 py-2.5 text-sm">{ref.note}</p>}
         {ref.portal && (
           <button
@@ -621,6 +625,8 @@ export function HostGalaxyPanel({ id }: { id: string }) {
   const itemsBySystem = useOrbit((s) => shownExtras(s)?.items);
   const cluster = useOrbit((s) => shownExtras(s)?.clusters.find((c) => c.id === galaxy.host?.cluster));
   const { select, requestFlight } = useOrbit.getActions();
+  const changed = useChangedInGalaxy(id);
+  const changedTotal = changed.reduce((n, c) => n + c.changed.moons, 0);
   const today = toDateKey(Date.now());
   const ref = galaxy.host!;
   const members = useMemo(
@@ -650,9 +656,11 @@ export function HostGalaxyPanel({ id }: { id: string }) {
               {total > 0 && ` · ${open} open`}
               {items > 0 && ` · ${items} item${items === 1 ? '' : 's'}`}
               {overdue ? <span className="text-danger"> · {overdue} overdue</span> : null}
+              {changedTotal ? <span className="text-danger"> · {changedText(changedTotal)}</span> : null}
             </p>
           </div>
         </div>
+        <ChangedSection groups={changed} />
         <Chips items={[ref.chip ?? ref.status, cluster ? `in ${cluster.name}` : undefined, ref.finished ? 'finished' : undefined]} />
         <KeptBy refOf={ref} />
         <Facts facts={ref.facts} />
@@ -677,6 +685,7 @@ export function HostGalaxyPanel({ id }: { id: string }) {
                     <span className="tabular block text-xs text-muted">
                       {[p.host?.code, p.host?.portal ? 'portal' : undefined, s.total || !n ? `${s.open} open` : undefined, n ? `${n} items` : undefined].filter(Boolean).join(' · ')}
                       {s.overdue ? <span className="text-danger"> · {s.overdue} overdue</span> : null}
+                      {changed.find((c) => c.system.id === p.id) ? <span className="text-danger"> · {changedText(changed.find((c) => c.system.id === p.id)!.changed.moons)}</span> : null}
                     </span>
                   </span>
                 </button>

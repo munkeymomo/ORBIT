@@ -115,6 +115,8 @@ export interface UniverseFilter {
   groupId: string | null;
   /** Hosted: only tasks with linked items (moons). */
   hasLinked: boolean;
+  /** Hosted: highlight the planets with a moon that changed since it was attached, dim the rest. */
+  hasChanged: boolean;
   /** Hosted: highlight every task that uses this attachment (by id). */
   uses: string | null;
   /** Hosted: show galaxies the host marks finished. */
@@ -881,7 +883,7 @@ export function createOrbitStore(deps: StoreDeps = {}): StoreApi<OrbitState> {
       confirmReq: null,
       toasts: [],
       expanded: [],
-      filter: { query: '', dueSoon: false, highPriority: false, parkedOnly: false, showDone: false, groupId: null, hasLinked: false, uses: null, showFinished: false },
+      filter: { query: '', dueSoon: false, highPriority: false, parkedOnly: false, showDone: false, groupId: null, hasLinked: false, hasChanged: false, uses: null, showFinished: false },
       cycle: 0,
       lastFocusEnd: null,
       dayDate: toDateKey(now()),

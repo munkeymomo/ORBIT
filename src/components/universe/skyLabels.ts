@@ -7,6 +7,7 @@ import { clamp } from '../../lib/util';
 import { circleRect, collapseWhenCrowded, placeOrbitLabels, wrapMiddle, type Measure, type OrbitLabel, type Rect } from './labels';
 import { galaxyBeaconSpot, LOD, systemBeaconSpot, type GalaxyPlace, type Size, type SystemPlace, type View } from './space';
 import type { Beacon } from '../../host/types';
+import { changedText } from '../../host/changed';
 import { daysBetween } from '../../lib/util';
 
 /** Planet names: 11.5px; a star's name: 13px or 15px, semibold; date labels: 11px, semibold. */
@@ -49,8 +50,9 @@ export function starNameRect(s: SystemPlace, sx: number, sy: number, k: number, 
 export function starSummary(pv: SystemPlace['pv']): string {
   const st = pv.stats;
   const items = pv.itemCount ?? 0;
-  if (st.total === 0) return items ? `${items} item${items === 1 ? '' : 's'}` : 'No tasks yet';
-  return `${st.open} open${st.parked ? ` · ${st.parked} parked` : ''}${items ? ` · ${items} items` : ''} · ${Math.round(st.progress * 100)}%${st.overdue ? ` · ${st.overdue} overdue` : ''}`;
+  const ch = pv.changed?.moons ? ` · ${changedText(pv.changed.moons)}` : '';
+  if (st.total === 0) return (items ? `${items} item${items === 1 ? '' : 's'}` : 'No tasks yet') + ch;
+  return `${st.open} open${st.parked ? ` · ${st.parked} parked` : ''}${items ? ` · ${items} items` : ''} · ${Math.round(st.progress * 100)}%${st.overdue ? ` · ${st.overdue} overdue` : ''}${pv.changed?.moons ? ` · ${changedText(pv.changed.moons)}` : ''}`;
 }
 
 export interface SkyLabels {
@@ -134,6 +136,7 @@ export function layoutSky(p: {
             text: t.title,
             rank: (t.status === 'done' ? 0 : 10) + (tv.active ? 8 : 0) + (late ? 5 : 0) + t.priority,
             force: t.id === p.selectedTask,
+            pill: tv.changed > 0 ? changedText(tv.changed) : undefined,
           },
         ];
       });
@@ -153,6 +156,7 @@ export function layoutSky(p: {
           // the live and big first; ghosts and the gone last
           rank: (it.state === 'live' ? 10 : 2) + (it.ghost ? -6 : 0) + Math.round(sl.d / 15),
           force: it.id === p.selectedTask,
+          pill: iv.changed > 0 ? changedText(iv.changed) : undefined,
         });
       });
       const laid = placeOrbitLabels(items, { cx: sx, cy: sy, measure, maxW: PLANET_LABEL_W, blocked, bounds });

@@ -11,7 +11,7 @@ import { DEFAULT_PREFS } from '../../src/data/normalise';
 
 const NOW = Date.UTC(2026, 10, 10, 9, 0, 0);
 const TODAY = '2026-11-10';
-const FILTER: UniverseFilter = { query: '', dueSoon: false, highPriority: false, parkedOnly: false, showDone: false, groupId: null, hasLinked: false, uses: null, showFinished: false };
+const FILTER: UniverseFilter = { query: '', dueSoon: false, highPriority: false, parkedOnly: false, showDone: false, groupId: null, hasLinked: false, hasChanged: false, uses: null, showFinished: false };
 
 function sky(v: Verse = demoVerse(NOW), filter: Partial<UniverseFilter> = {}) {
   const a = adaptVerse(v, []);

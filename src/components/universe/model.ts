@@ -6,6 +6,7 @@ import { abilities, may, type HostAbilities } from '../../host/caps';
 import { projectStats, type ProjectStats } from '../../store/selectors';
 import { isBlocked, taskProgress } from '../../lib/scoring';
 import { clamp, daysBetween, toDateKey } from '../../lib/util';
+import { changedInSystem, changedMoons, type ChangedIn } from '../../host/changed';
 
 export interface TaskView {
   task: Task;
@@ -17,6 +18,8 @@ export interface TaskView {
   moons?: MoonSet;
   /** Hosted: the task uses the attachment picked in the "Uses …" filter. */
   uses: boolean;
+  /** Hosted: how many of its moons changed since they were attached (0 = not marked). */
+  changed: number;
 }
 
 /** A record shown as a planet (never a task: it has no status, priority, focus or due date). */
@@ -24,6 +27,8 @@ export interface ItemView {
   item: ItemPlanet;
   /** Matches the text being highlighted (always, with no text). */
   matches: boolean;
+  /** How many of its moons changed since they were attached (0 = not marked). */
+  changed: number;
 }
 
 export interface ProjectView {
@@ -41,6 +46,8 @@ export interface ProjectView {
   /** Has at least one task matching the text query (auto-expand while searching). */
   queryHit: boolean;
   hasActive: boolean;
+  /** Hosted: the planets of this system with a changed moon (open tasks, items that are not ghosts), and the moons. */
+  changed: ChangedIn;
   /** A task may be added here (always for ORBIT's own systems; per the host's caps for a host's). */
   canAdd: boolean;
 }
@@ -75,7 +82,7 @@ function taskPasses(t: Task, f: UniverseFilter, today: string, moons?: MoonSet):
 }
 
 export function filterActive(f: UniverseFilter) {
-  return !!(f.query.trim() || f.dueSoon || f.highPriority || f.parkedOnly || f.groupId || f.hasLinked || f.uses);
+  return !!(f.query.trim() || f.dueSoon || f.highPriority || f.parkedOnly || f.groupId || f.hasLinked || f.uses || f.hasChanged);
 }
 
 const NO_TASKS: Task[] = [];
@@ -156,25 +163,32 @@ export function buildModel({
         const nameHit = !!q && project.name.toLowerCase().includes(q);
         const tv: TaskView[] = visible.map((task) => ({
           task,
-          matches: (!q || nameHit || task.title.toLowerCase().includes(q) || task.notes.toLowerCase().includes(q)) && (!filter.uses || usesIt(task.id)),
+          matches: (!q || nameHit || task.title.toLowerCase().includes(q) || task.notes.toLowerCase().includes(q)) && (!filter.uses || usesIt(task.id)) && (!filter.hasChanged || changedMoons(attachments[task.id]).length > 0),
           blocked: task.status !== 'done' && isBlocked(task, byId).length > 0,
           active: task.id === activeTaskId,
           progress: taskProgress(task),
           moons: attachments[task.id],
           uses: usesIt(task.id),
+          changed: changedMoons(attachments[task.id]).length,
         }));
         // items in verse order, ghosts after the system's own, the archived and gone last
         const iv: ItemView[] = (items[project.id] ?? [])
           .map((item, i) => ({ item, i }))
           .sort((a, b) => Number(a.item.ghost) - Number(b.item.ghost) || ITEM_STATE_ORDER[a.item.state] - ITEM_STATE_ORDER[b.item.state] || a.i - b.i)
-          .map(({ item }) => ({ item, matches: !q || nameHit || item.title.toLowerCase().includes(q) || (item.sub ?? '').toLowerCase().includes(q) }));
+          .map(({ item }) => ({
+            item,
+            matches: (!q || nameHit || item.title.toLowerCase().includes(q) || (item.sub ?? '').toLowerCase().includes(q)) && (!filter.hasChanged || (!item.ghost && changedMoons(item.moons).length > 0)),
+            changed: item.ghost ? 0 : changedMoons(item.moons).length,
+          }));
         const itemHit = !!q && iv.some((x) => x.item.title.toLowerCase().includes(q) || (x.item.sub ?? '').toLowerCase().includes(q));
         const queryHit = !!q && (tv.some((t) => t.task.title.toLowerCase().includes(q)) || itemHit);
         const groupOk = !filter.groupId || project.groupId === filter.groupId;
         // task filters ask about tasks: a system of items only matches when none is on
         const structuralOk = !structural || tv.some((t) => t.task.status !== 'done' || filter.showDone);
         const usesOk = !filter.uses || tv.some((t) => t.uses);
-        const matches = groupOk && structuralOk && usesOk && (!q || nameHit || queryHit || tv.some((t) => t.matches && !!q));
+        const changed = changedInSystem(project.id, own, attachments, items[project.id] ?? []);
+        const changedOk = !filter.hasChanged || changed.planets.length > 0;
+        const matches = groupOk && structuralOk && usesOk && changedOk && (!q || nameHit || queryHit || tv.some((t) => t.matches && !!q));
         return {
           project,
           stats: projectStats(project.id, tasks, today),
@@ -183,6 +197,7 @@ export function buildModel({
           tasks: tv,
           items: iv,
           itemCount: iv.length ? Math.max(project.host?.count ?? 0, iv.length) : 0,
+          changed,
           matches,
           queryHit,
           hasActive: own.some((t) => t.id === activeTaskId),

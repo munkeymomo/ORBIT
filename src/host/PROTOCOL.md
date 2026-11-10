@@ -225,7 +225,7 @@ so nothing that works on tasks can see them. What ORBIT does with each field:
 | `state` | `live` filled; `archived` hollow; `gone` hollow and struck through; the panel shows a badge |
 | `ghost` | faint, dashed, with a small "elsewhere" mark; its panel shows only where it lives (its `also`) |
 | `note`, `notes`, `facts` | shown in its panel (`facts` as label/value rows) |
-| `attachments`, `more` | its moons: five drawn, then "+n" (`more` included); a moon with `flag: 'changed'` is red; listed in its panel and beside it when selected |
+| `attachments`, `more` | its moons: five drawn, then "+n" (`more` included); a moon with `flag: 'changed'` is red; listed in its panel and beside it when selected. A planet with at least one changed moon (among those sent; `more` never counts) is *marked* (a red notch on its rim, a "n changed" pill on its name), a system adds them up (a red "≠ n" tag on its star, "n changed" in its line), a galaxy too (in its counts at whole-universe level), and the panels list "Changed" first. Derived by ORBIT from the moons sent; no extra field. A filter ("Has something changed") highlights marked planets |
 | `open` | "Open in <host>" in its panel |
 | `also` | its wormholes (below) |
 | `system.count` | a system holding items says "n items": `count` when given, else the item planets sent |

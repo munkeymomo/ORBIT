@@ -81,7 +81,7 @@ import type { Handshake, OrbitHost, Planet, Verse } from '../../src/host/types';
 import type { UniverseFilter } from '../../src/store/store';
 
 const TODAY = '2026-11-10';
-const FILTER: UniverseFilter = { query: '', dueSoon: false, highPriority: false, parkedOnly: false, showDone: false, groupId: null, hasLinked: false, uses: null, showFinished: false };
+const FILTER: UniverseFilter = { query: '', dueSoon: false, highPriority: false, parkedOnly: false, showDone: false, groupId: null, hasLinked: false, hasChanged: false, uses: null, showFinished: false };
 
 async function hosted(o: Parameters<typeof createFakeHost>[0] = {}) {
   const host = createFakeHost({ now: NOW, editable: true, ...o });
