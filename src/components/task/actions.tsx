@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
 import { CalendarPlus, ChevronDown, Infinity as InfinityIcon, Play } from 'lucide-react';
 import { useOrbit } from '../../store/store';
+import { useAbilities } from '../../host/useAbilities';
+import { mayWork } from '../../host/caps';
 import type { DaySlot } from '../../types';
 import { Button, Menu, cx } from '../ui/primitives';
 import { SLOTS, currentSlot, toDateKey } from '../../lib/util';
@@ -10,10 +12,14 @@ export function StartFocusButton({ taskId, size = 'md', className, label = 'Star
   const startFocus = useOrbit((s) => s.startFocus);
   const focusMin = useOrbit((s) => s.prefs.focusMin);
   const setView = useOrbit((s) => s.setView);
+  const can = useAbilities();
+  const host = useOrbit((s) => s.tasks.find((t) => t.id === taskId)?.host);
   const go = (minutes?: number, flow?: boolean) => {
     startFocus({ taskId, minutes: minutes ?? focusMin, mode: flow ? 'flow' : 'countdown' });
     onStarted?.();
   };
+  // Focus on a host's task needs the host to keep working state.
+  if (!mayWork(can, host)) return null;
   return (
     <div className={cx('inline-flex', className)}>
       <Button variant="teal" size={size} className="!rounded-r-none" icon={<Play size={size === 'sm' ? 14 : 16} fill="currentColor" />} onClick={() => go()}>
@@ -44,6 +50,9 @@ export function PlanTodayButton({ taskId, size = 'md' }: { taskId: string; size?
   const today = toDateKey(Date.now());
   const item = useOrbit((s) => s.dayItems.find((d) => d.taskId === taskId && d.date === today));
   const slotLabel = item ? SLOTS.find((s) => s.id === item.slot)?.label : null;
+  const can = useAbilities();
+  const host = useOrbit((s) => s.tasks.find((t) => t.id === taskId)?.host);
+  if (!mayWork(can, host)) return null;
   return (
     <Menu
       label="Plan for today"

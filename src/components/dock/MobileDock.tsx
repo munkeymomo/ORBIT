@@ -1,6 +1,8 @@
 import { useRef, useState } from 'react';
 import { ChevronUp, CircleCheck, Coffee, Pause, Play, SquareParking, Square } from 'lucide-react';
 import { useOrbit } from '../../store/store';
+import { useAbilities } from '../../host/useAbilities';
+import { mayWork } from '../../host/caps';
 import { colorHex } from '../../lib/colors';
 import { useNow } from '../../lib/hooks';
 import { progressFraction } from '../../lib/timer';
@@ -135,13 +137,14 @@ function IdleSlide() {
   const { suggestions } = useSuggestions();
   const top = suggestions[0]?.task;
   const { startFocus, openResume } = useOrbit.getActions();
+  const can = useAbilities();
   return (
     <div className="flex h-[52px] items-center gap-2.5 rounded-2xl bg-surface-2 pr-1.5 pl-3">
       <span className="min-w-0 flex-1">
         <span className="block text-[11px] font-semibold tracking-[0.1em] text-faint uppercase">Nothing in focus</span>
         <span className="block truncate text-[13px] text-muted">{top ? `Next: ${top.title}` : 'Tap + to capture something'}</span>
       </span>
-      {top && (
+      {top && mayWork(can, top.host) && (
         <Button variant="teal" size="md" className="!h-11" icon={<Play size={15} fill="currentColor" />} onClick={() => (top.status === 'parked' ? openResume(top.id) : startFocus({ taskId: top.id }))}>
           Start
         </Button>
@@ -155,6 +158,7 @@ function DockSheet({ open, onClose }: { open: boolean; onClose: () => void }) {
   const task = useOrbit((s) => (s.focus?.taskId ? s.tasks.find((t) => t.id === s.focus!.taskId) : null));
   const parked = useDockData();
   const { openPark, completeTask, stopFocus, openResume, setCaptureOpen, setView } = useOrbit.getActions();
+  const canCapture = useAbilities().personal;
   const act = (fn: () => void) => () => {
     onClose();
     fn();
@@ -209,9 +213,11 @@ function DockSheet({ open, onClose }: { open: boolean; onClose: () => void }) {
           )}
         </section>
         <div className="grid grid-cols-2 gap-2">
-          <Button variant="primary" size="lg" onClick={act(() => setCaptureOpen(true))}>
-            Quick capture
-          </Button>
+          {canCapture && (
+            <Button variant="primary" size="lg" onClick={act(() => setCaptureOpen(true))}>
+              Quick capture
+            </Button>
+          )}
           <Button variant="secondary" size="lg" onClick={act(() => setView('focus'))}>
             Open Focus
           </Button>

@@ -2,6 +2,7 @@ import { useEffect } from 'react';
 import { orbit, orbitStore, useOrbit } from './store/store';
 import type { ViewName } from './types';
 import { useHotkeys, useIsPhone, useMediaQuery } from './lib/hooks';
+import { localSet } from './lib/local';
 import { parkedTasks } from './store/selectors';
 import { NavRail } from './components/shell/NavRail';
 import { TopBar } from './components/shell/TopBar';
@@ -66,11 +67,7 @@ function useThemeAndMotion() {
     const t = theme === 'system' ? (prefersLight ? 'light' : 'dark') : theme;
     document.documentElement.dataset.theme = t;
     document.querySelector('meta[name="theme-color"]')?.setAttribute('content', t === 'light' ? '#F4F4F8' : '#0A0C12');
-    try {
-      localStorage.setItem('orbit-theme', theme);
-    } catch {
-      /* storage may be blocked */
-    }
+    localSet('orbit-theme', theme);
   }, [theme, prefersLight]);
   useEffect(() => {
     const reduce = motion === 'reduce' || (motion === 'system' && prefersReduced);
@@ -176,6 +173,7 @@ function CurrentView() {
 
 export default function App() {
   const ready = useOrbit((s) => s.ready);
+  const hosted = useOrbit((s) => !!s.host);
   const phone = useIsPhone();
   useThemeAndMotion();
   useHashRoute();
@@ -195,7 +193,8 @@ export default function App() {
     <div className="flex h-full overflow-hidden">
       {!phone && <NavRail />}
       <div className="relative flex min-w-0 flex-1 flex-col">
-        <TopBar />
+        {/* Embedded, the host shows its own header; search stays on / and in the Universe toolbar. */}
+        {!hosted && <TopBar />}
         <StorageBanner />
         <main id="main" className="relative min-h-0 flex-1 overflow-hidden">
           <CurrentView />

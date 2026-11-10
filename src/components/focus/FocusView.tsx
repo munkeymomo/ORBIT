@@ -1,6 +1,8 @@
 import { useMemo, useState } from 'react';
 import { CircleCheck, Coffee, Infinity as InfinityIcon, Pause, Play, Plus, Send, SquareParking, Square, Timer } from 'lucide-react';
 import { useOrbit } from '../../store/store';
+import { useAbilities } from '../../host/useAbilities';
+import { mayWork } from '../../host/caps';
 import type { TimerMode } from '../../types';
 import { useNow } from '../../lib/hooks';
 import { isOvertime } from '../../lib/timer';
@@ -161,11 +163,13 @@ function Setup() {
   const { startFocus, startBreak, dismissLastFocusEnd, openResume } = useOrbit.getActions();
   const { suggestions } = useSuggestions();
   const top = suggestions[0]?.task;
-  const [taskId, setTaskId] = useState<string>(() => last?.taskId ?? top?.id ?? '');
+  const [taskId, setTaskId] = useState<string>(() => last?.taskId ?? (top && !top.host ? top.id : '') ?? '');
   const [minutes, setMinutes] = useState(prefs.focusMin);
   const [custom, setCustom] = useState('');
   const [mode, setMode] = useState<TimerMode>('countdown');
-  const open = tasks.filter((t) => t.status !== 'done');
+  const can = useAbilities();
+  // Tasks a host keeps can only be focused on when the host keeps working state for them.
+  const open = tasks.filter((t) => t.status !== 'done' && mayWork(can, t.host));
   const chosen = tasks.find((t) => t.id === taskId);
   const longNext = last && last.cycle > 0 && last.cycle % prefs.longBreakEvery === 0;
 

@@ -1,6 +1,8 @@
 import { useMemo } from 'react';
 import { CircleCheck, Coffee, MoreHorizontal, Pause, Play, Plus, SquareParking, Square } from 'lucide-react';
 import { useOrbit } from '../../store/store';
+import { useAbilities } from '../../host/useAbilities';
+import { mayWork } from '../../host/caps';
 import type { Checkpoint, Task } from '../../types';
 import { colorHex } from '../../lib/colors';
 import { useNow } from '../../lib/hooks';
@@ -28,6 +30,7 @@ export function Dock() {
   const parked = useDockData();
   const openResume = useOrbit((s) => s.openResume);
   const setCaptureOpen = useOrbit((s) => s.setCaptureOpen);
+  const can = useAbilities();
   const MAX = 5;
   const shown = parked.slice(0, MAX);
   const overflow = parked.slice(MAX);
@@ -55,9 +58,11 @@ export function Dock() {
           />
         )}
       </div>
-      <Button variant="secondary" onClick={() => setCaptureOpen(true)} icon={<Plus size={16} />} className="shrink-0" title="Capture (C)">
-        <span className="hidden md:inline">Capture</span>
-      </Button>
+      {can.personal && (
+        <Button variant="secondary" onClick={() => setCaptureOpen(true)} icon={<Plus size={16} />} className="shrink-0" title="Capture (C)">
+          <span className="hidden md:inline">Capture</span>
+        </Button>
+      )}
     </footer>
   );
 }
@@ -89,6 +94,7 @@ function NowSlot() {
   const now = useNow(focus ? 500 : null);
   const { suggestions } = useSuggestions();
   const top = suggestions[0]?.task;
+  const can = useAbilities();
 
   if (!focus) {
     return (
@@ -100,7 +106,7 @@ function NowSlot() {
           <span className="block text-[11px] font-semibold tracking-[0.1em] text-faint uppercase">Nothing in focus</span>
           {top ? <span className="block truncate text-sm text-muted">Next: {top.title}</span> : <span className="block truncate text-sm text-muted">Capture or create a task to begin</span>}
         </span>
-        {top && (
+        {top && mayWork(can, top.host) && (
           <Button size="sm" variant="teal" icon={<Play size={13} fill="currentColor" />} onClick={() => (top.status === 'parked' ? useOrbit.getActions().openResume(top.id) : startFocus({ taskId: top.id }))}>
             Start
           </Button>

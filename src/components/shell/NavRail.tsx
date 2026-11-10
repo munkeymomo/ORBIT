@@ -1,6 +1,7 @@
-import { CalendarDays, ChartLine, Compass, Inbox, Keyboard, Orbit, Settings2, Timer } from 'lucide-react';
+import { CalendarDays, ChartLine, Compass, Inbox, Keyboard, Orbit, Search, Settings2, Timer } from 'lucide-react';
 import type { ViewName } from '../../types';
-import { useOrbit } from '../../store/store';
+import { useOrbit, viewAvailable } from '../../store/store';
+import { useAbilities } from '../../host/useAbilities';
 import { cx } from '../ui/primitives';
 import { remainingMs, elapsedMs } from '../../lib/timer';
 import { useNow } from '../../lib/hooks';
@@ -53,13 +54,15 @@ export function NavRail() {
   const view = useOrbit((s) => s.view);
   const setView = useOrbit((s) => s.setView);
   const setHelpOpen = useOrbit((s) => s.setHelpOpen);
+  const setSearchOpen = useOrbit((s) => s.setSearchOpen);
   const inbox = useInboxCount();
+  const can = useAbilities();
   return (
     <nav aria-label="Main" className="z-20 flex w-[76px] shrink-0 flex-col items-center gap-1 border-r border-line bg-surface/70 py-4 backdrop-blur-xl">
       <button className="mb-4 rounded-xl p-1" onClick={() => setView('universe')} aria-label="ORBIT home">
         <Logo />
       </button>
-      {NAV.map((n) => {
+      {NAV.filter((n) => viewAvailable(can, n.id)).map((n) => {
         const active = view === n.id;
         return (
           <button
@@ -84,6 +87,11 @@ export function NavRail() {
         );
       })}
       <div className="flex-1" />
+      {can.hosted && (
+        <button onClick={() => setSearchOpen(true)} className="mb-1 flex h-10 w-10 items-center justify-center rounded-xl text-faint hover:bg-surface-2 hover:text-text" title="Search tasks (/)" aria-label="Search tasks">
+          <Search size={18} />
+        </button>
+      )}
       <button onClick={() => setHelpOpen(true)} className="flex h-10 w-10 items-center justify-center rounded-xl text-faint hover:bg-surface-2 hover:text-text" title="Keyboard shortcuts (?)" aria-label="Keyboard shortcuts">
         <Keyboard size={18} />
       </button>

@@ -1,6 +1,8 @@
 import { useState } from 'react';
 import { ChevronDown, Compass, Lock, Play } from 'lucide-react';
 import { useOrbit } from '../../store/store';
+import { useAbilities } from '../../host/useAbilities';
+import { mayWork } from '../../host/caps';
 import type { Energy } from '../../types';
 import type { Reason, Suggestion } from '../../lib/scoring';
 import { fmtMinutes } from '../../lib/util';
@@ -176,6 +178,7 @@ function TopPick({ s }: { s: Suggestion }) {
 function Row({ s, rank, max }: { s: Suggestion; rank: number; max: number }) {
   const project = useOrbit((st) => st.projects.find((p) => p.id === s.task.projectId));
   const { select, startFocus, openResume } = useOrbit.getActions();
+  const can = useAbilities();
   const [open, setOpen] = useState(false);
   const pct = max > 0 ? Math.max(4, Math.min(100, (s.score / max) * 100)) : 4;
   return (
@@ -195,9 +198,11 @@ function Row({ s, rank, max }: { s: Suggestion; rank: number; max: number }) {
         <button onClick={() => setOpen((o) => !o)} aria-expanded={open} className="rounded-lg px-2 py-1 text-xs font-medium text-muted hover:bg-surface-2 hover:text-text">
           Why?
         </button>
-        <Button size="sm" variant="secondary" icon={<Play size={13} fill="currentColor" />} onClick={() => (s.task.status === 'parked' ? openResume(s.task.id) : startFocus({ taskId: s.task.id }))} aria-label={`Start ${s.task.title}`}>
-          <span className="hidden sm:inline">{s.task.status === 'parked' ? 'Resume' : 'Start'}</span>
-        </Button>
+        {mayWork(can, s.task.host) && (
+          <Button size="sm" variant="secondary" icon={<Play size={13} fill="currentColor" />} onClick={() => (s.task.status === 'parked' ? openResume(s.task.id) : startFocus({ taskId: s.task.id }))} aria-label={`Start ${s.task.title}`}>
+            <span className="hidden sm:inline">{s.task.status === 'parked' ? 'Resume' : 'Start'}</span>
+          </Button>
+        )}
       </div>
       {open && (
         <div className="anim-fade flex flex-wrap gap-1.5 border-t border-line px-3.5 py-3">

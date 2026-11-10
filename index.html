@@ -9,9 +9,14 @@
     <link rel="apple-touch-icon" href="./apple-touch-icon.png" />
     <title>ORBIT</title>
     <script>
-      // Apply the saved theme before first paint to avoid a flash.
+      // Apply the saved theme before first paint to avoid a flash. Not when a host application is attached
+      // (window.orbitHost, the parent frame's, or ?orbit-host=demo): then ORBIT keeps nothing in the browser.
       try {
-        var t = localStorage.getItem('orbit-theme');
+        var hosted = /[?&]orbit-host=/.test(location.search) || !!window.orbitHost;
+        try {
+          hosted = hosted || (window.parent !== window && !!window.parent.orbitHost);
+        } catch (e) {}
+        var t = hosted ? null : localStorage.getItem('orbit-theme');
         if (t === 'light' || (t === 'system' && matchMedia('(prefers-color-scheme: light)').matches)) {
           document.documentElement.dataset.theme = 'light';
         }

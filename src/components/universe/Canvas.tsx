@@ -3,6 +3,7 @@ import { ChevronDown, ChevronRight, CircleHelp, Lock, Maximize, Minus, Orbit, Pa
 import { orbit, useOrbit } from '../../store/store';
 import { colorHex, inkOn } from '../../lib/colors';
 import { useHotkeys } from '../../lib/hooks';
+import { localGet, localSet } from '../../lib/local';
 import { clamp, daysBetween, describeDue, fmtMinutes, toDateKey } from '../../lib/util';
 import { IconButton, Menu, cx } from '../ui/primitives';
 import { ProjectGlyph, PRIORITY_META } from '../ui/visuals';
@@ -38,7 +39,7 @@ type Drag =
 
 function loadView(): View | null {
   try {
-    const v = JSON.parse(localStorage.getItem(VIEW_KEY) ?? 'null');
+    const v = JSON.parse(localGet(VIEW_KEY) ?? 'null');
     return v && Number.isFinite(v.x) && Number.isFinite(v.y) && Number.isFinite(v.k) ? v : null;
   } catch {
     return null;
@@ -94,11 +95,7 @@ export function UniverseCanvas({ onNewSystem, onNewGalaxy }: { onNewSystem: (gal
     setViewState(v);
     if (saveTimer.current) window.clearTimeout(saveTimer.current);
     saveTimer.current = window.setTimeout(() => {
-      try {
-        localStorage.setItem(VIEW_KEY, JSON.stringify(v));
-      } catch {
-        /* ignore */
-      }
+      localSet(VIEW_KEY, JSON.stringify(v));
     }, 250);
   }, []);
 

@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { Sparkles } from 'lucide-react';
 import { useOrbit } from '../../store/store';
+import { useAbilities } from '../../host/useAbilities';
 import { useIsPhone } from '../../lib/hooks';
 import { Button, Input } from '../ui/primitives';
 import { Logo } from '../shell/NavRail';
@@ -14,6 +15,7 @@ export function UniverseView() {
   const galaxyCount = useOrbit((s) => s.groups.length);
   const { createProject, createGroup, select, toggleExpanded, freeSystemSpot, requestFlight } = useOrbit.getActions();
   const phone = useIsPhone();
+  const hosted = useOrbit((s) => !!s.host);
   const [newSystemIn, setNewSystemIn] = useState<{ groupId: string | null } | null>(null);
   const [newGalaxy, setNewGalaxy] = useState(false);
 
@@ -26,7 +28,7 @@ export function UniverseView() {
     select({ type: 'project', id: p.id });
   };
 
-  if (count === 0 && galaxyCount === 0) return <FirstRun onCreate={create} />;
+  if (count === 0 && galaxyCount === 0) return hosted ? <EmptyHosted /> : <FirstRun onCreate={create} />;
 
   return (
     <>
@@ -46,6 +48,21 @@ export function UniverseView() {
         }}
       />
     </>
+  );
+}
+
+/** Embedded, with nothing in the verse: no first-run form, no example (the host owns what appears here). */
+function EmptyHosted() {
+  const can = useAbilities();
+  const error = useOrbit((s) => s.host?.error);
+  return (
+    <div className="canvas-dots flex h-full items-center justify-center p-5">
+      <div className="max-w-sm rounded-3xl border border-line bg-surface/80 p-6 text-center shadow-panel backdrop-blur-xl">
+        <Logo size={40} />
+        <p className="mt-3 font-display text-lg font-semibold">Nothing to show yet</p>
+        <p className="mt-1 text-sm text-muted">{error ?? `When ${can.name} has records for this view, they appear here as galaxies, stars and planets.`}</p>
+      </div>
+    </div>
   );
 }
 

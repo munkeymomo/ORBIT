@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { CalendarDays, ChartLine, Compass, Inbox, LayoutGrid, Orbit, Plus, Settings2, Timer } from 'lucide-react';
 import { useOrbit } from '../../store/store';
+import { useAbilities } from '../../host/useAbilities';
 import { cx, Modal } from '../ui/primitives';
 import { useInboxCount } from './NavRail';
 import type { ViewName } from '../../types';
@@ -18,6 +19,7 @@ export function TabBar() {
   const setView = useOrbit((s) => s.setView);
   const setCaptureOpen = useOrbit((s) => s.setCaptureOpen);
   const inbox = useInboxCount();
+  const can = useAbilities();
   const [more, setMore] = useState(false);
   const moreActive = MORE.some((m) => m.id === view);
 
@@ -37,17 +39,17 @@ export function TabBar() {
     <>
       <nav aria-label="Main" className="safe-bottom z-20 flex shrink-0 items-stretch border-t border-line bg-surface/90 px-1 backdrop-blur-xl">
         <Tab id="universe" label="Universe" icon={Orbit} />
-        <Tab id="today" label="Today" icon={CalendarDays} />
+        {can.work && <Tab id="today" label="Today" icon={CalendarDays} />}
         <div className="flex flex-1 items-center justify-center">
-          <button
+          {can.personal && <button
             onClick={() => setCaptureOpen(true)}
             aria-label="Capture"
             className="-mt-5 flex h-14 w-14 items-center justify-center rounded-2xl bg-accent text-white shadow-[0_8px_24px_-6px_var(--accent)] active:scale-95"
           >
             <Plus size={26} strokeWidth={2.4} />
-          </button>
+          </button>}
         </div>
-        <Tab id="inbox" label="Inbox" icon={Inbox} badge={inbox} />
+        {can.personal && <Tab id="inbox" label="Inbox" icon={Inbox} badge={inbox} />}
         <button
           onClick={() => setMore(true)}
           aria-haspopup="dialog"

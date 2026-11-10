@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react';
+import { localGet, localSet } from '../../lib/local';
 import {
   closestCorners,
   DndContext,
@@ -36,13 +37,7 @@ export function DayBoard() {
   const { setDayDate, planTask, moveDayItem, unplan } = useOrbit.getActions();
   const desktop = useIsDesktop();
   const phone = useIsPhone();
-  const [blocks, setBlocks] = useState(() => {
-    try {
-      return localStorage.getItem('orbit-timeblocks') === '1';
-    } catch {
-      return false;
-    }
-  });
+  const [blocks, setBlocks] = useState(() => localGet('orbit-timeblocks') === '1');
   const [activeDrag, setActiveDrag] = useState<string | null>(null);
   const [trayOpen, setTrayOpen] = useState(false);
   const today = toDateKey(Date.now());
@@ -114,11 +109,7 @@ export function DayBoard() {
 
   const setBlocksPersist = (v: boolean) => {
     setBlocks(v);
-    try {
-      localStorage.setItem('orbit-timeblocks', v ? '1' : '0');
-    } catch {
-      /* ignore */
-    }
+    localSet('orbit-timeblocks', v ? '1' : '0');
   };
 
   return (

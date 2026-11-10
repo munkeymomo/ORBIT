@@ -2,6 +2,7 @@ import { useRef, useState, useSyncExternalStore } from 'react';
 import { Bell, Coffee, Copy, Download, FolderOpen, HardDrive, Info, Keyboard, MonitorSmartphone, Palette, Sparkles, Timer, Trash2, Upload, Volume2 } from 'lucide-react';
 import { APP_VERSION, DOWNLOAD_URL, SUPPORT_URL, desktop, isFileCopy } from '../../lib/desktop';
 import { useOrbit } from '../../store/store';
+import { useAbilities } from '../../host/useAbilities';
 import type { Prefs } from '../../types';
 import { createBackup, parseBackupText, type ValidationResult } from '../../lib/backup';
 import {
@@ -19,14 +20,15 @@ import { Button, Field, Select, Segmented, Textarea, Toggle, cx } from '../ui/pr
 import { plural } from '../../lib/util';
 
 export function SettingsView() {
+  const hosted = useOrbit((s) => !!s.host);
   return (
     <div className="h-full overflow-y-auto">
       <div className="mx-auto max-w-3xl space-y-5 px-4 py-5 md:px-8 md:py-8">
         <Appearance />
         <FocusPrefs />
         <Alerts />
-        <DataSection />
-        <InstallSection />
+        {hosted ? <HostDataSection /> : <DataSection />}
+        {!hosted && <InstallSection />}
         <About />
       </div>
     </div>
@@ -165,6 +167,22 @@ function Alerts() {
           }
         />
       </div>
+    </Section>
+  );
+}
+
+/** Embedded: the host keeps everything, so there is nothing here to back up, restore or erase. */
+function HostDataSection() {
+  const can = useAbilities();
+  const p = useOrbit((s) => s.projects.length);
+  const t = useOrbit((s) => s.tasks.length);
+  const nPlacements = useOrbit((s) => s.placements.length);
+  return (
+    <Section icon={<HardDrive size={18} />} title="Your data" desc={<>Records are kept by {can.name}. Positions and preferences are kept by {can.name} on this computer.</>}>
+      <p className="tabular text-sm text-muted">
+        {plural(p, 'system')} · {plural(t, 'task')} shown from {can.name} · {plural(nPlacements, 'position')} you set
+      </p>
+      <p className="mt-2 text-sm text-muted">Backups, examples and erasing are not offered here: ORBIT keeps nothing of its own while {can.name} has it open.</p>
     </Section>
   );
 }
