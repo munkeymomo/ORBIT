@@ -653,8 +653,8 @@ export function createOrbitStore(deps: StoreDeps = {}): StoreApi<OrbitState> {
           get().tick();
           return;
         }
-        // Hosted: only what the host keeps for ORBIT comes back from its store (positions and preferences in
-        // this stage); host records come from the verse.
+        // Hosted: only what the host keeps for ORBIT comes back from its store (positions and preferences, and
+        // working state when it keeps work); host records come from the verse, with working state laid over.
         const info = hosted.info;
         const ab = abilities(info);
         const keep = <K extends keyof Snapshot>(k: K, when: boolean) => (when ? snap[k] : emptySnapshot()[k]);
