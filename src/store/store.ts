@@ -361,6 +361,8 @@ export function createOrbitStore(deps: StoreDeps = {}): StoreApi<OrbitState> {
       if (get().toasts.some((t) => t.text === text)) return;
       get().toast(open && hostApi ? { text, action: { label: can().openLabel, run: () => get().openInHost(open) }, timeout: 8000 } : { text });
     };
+    /** Working state (focus, parking, the day plan) is only ever for a task ORBIT has: never an item. */
+    const isTask = (id: string) => get().tasks.some((t) => t.id === id);
     const onlyPosition = (patch: object) => Object.keys(patch).every((k) => k === 'x' || k === 'y');
     /** Tasks being removed by the host (taken off screen at once, put back if the host refuses). */
     const removing = new Map<string, { task: Task; index: number }>();
@@ -1514,6 +1516,8 @@ export function createOrbitStore(deps: StoreDeps = {}): StoreApi<OrbitState> {
       /* ---------- focus ---------- */
 
       startFocus: (o) => {
+        // only a task can be focused on (an item, or any id that is not a task, never can)
+        if (o.taskId && !isTask(o.taskId)) return;
         if (o.taskId && !mayWork(can(), ownerOf('tasks', o.taskId))) return refuse(refusal.work(can()));
         const prefs = get().prefs;
         const rt = get().focus;
@@ -1589,9 +1593,9 @@ export function createOrbitStore(deps: StoreDeps = {}): StoreApi<OrbitState> {
       },
       parkTask: (taskId, input, opts) => {
         const t = now();
-        if (!mayWork(can(), ownerOf('tasks', taskId))) {
+        if (!isTask(taskId) || !mayWork(can(), ownerOf('tasks', taskId))) {
           // Refused: the checkpoint it would have made is returned but is not in the store.
-          refuse(refusal.work(can()));
+          if (isTask(taskId)) refuse(refusal.work(can()));
           return { id: uid(), createdAt: t, updatedAt: t, taskId, doing: '', stoppedAt: '', nextAction: '', notes: '', links: [], timer: null, resumedAt: null, auto: !!opts?.auto };
         }
         const rt = get().focus;
@@ -1690,6 +1694,7 @@ export function createOrbitStore(deps: StoreDeps = {}): StoreApi<OrbitState> {
       /* ---------- day plan ---------- */
 
       planTask: (taskId, date, slot, index) => {
+        if (!isTask(taskId)) return;
         if (!mayWork(can(), ownerOf('tasks', taskId))) return refuse(refusal.work(can()));
         const existing = get().dayItems.find((d) => d.taskId === taskId && d.date === date);
         if (existing) {
