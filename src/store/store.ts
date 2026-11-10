@@ -9,7 +9,9 @@ import type {
   FocusRuntime,
   FocusSession,
   Group,
+  HostRef,
   Link,
+  Placement,
   Prefs,
   Priority,
   Project,
@@ -28,10 +30,15 @@ import { uid, toDateKey } from '../lib/util';
 import { nextUnusedColor } from '../lib/colors';
 import { buildExample } from '../data/example';
 import { findFreeSpot, nextGalaxySpot, spiralLayout, SYSTEM_SPACING, type Pt } from '../data/layout';
+import type { Handshake, Open, OrbitHost } from '../host/types';
+import { isUnchanged } from '../host/types';
+import { adaptVerse, DEEP_SPACE, placementKey, type HostExtras } from '../host/adapt';
+import { abilities, may, mayWork, refusal, STANDALONE, type HostAbilities } from '../host/caps';
+import { createRecordWriter } from '../host/writer';
 
 /* ---------------- UI-only types ---------------- */
 
-export type Selection = { type: 'task' | 'project' | 'group'; id: string } | null;
+export type Selection = { type: 'task' | 'project' | 'group' | 'beacon'; id: string } | null;
 
 /** A request for the Universe to fly somewhere (from search, panels, other views). */
 export interface Flight {
@@ -94,6 +101,32 @@ export interface UniverseFilter {
   parkedOnly: boolean;
   showDone: boolean;
   groupId: string | null;
+  /** Hosted: only tasks with linked items (moons). */
+  hasLinked: boolean;
+  /** Hosted: highlight every task that uses this attachment (by id). */
+  uses: string | null;
+  /** Hosted: show galaxies the host marks finished. */
+  showFinished: boolean;
+}
+
+/**
+ * What a host application provides besides the records merged into groups/projects/tasks (see src/host).
+ * null when ORBIT runs on its own.
+ */
+export interface HostSlice extends HostExtras {
+  info: Handshake;
+  verseId: string;
+  /** The rev of the verse on screen ('' before the first one arrives). */
+  rev: string;
+  /** Set when the host could not be reached or answered with something unusable. */
+  error?: string;
+}
+
+export interface InitOptions {
+  /** Run embedded: records come from this host, and ORBIT's own state goes to its store. */
+  host?: { host: OrbitHost; info: Handshake } | null;
+  /** A host was found but refused (shown on screen; ORBIT runs on its own, in memory). */
+  hostRefusal?: string | null;
 }
 
 export interface OrbitState extends Snapshot {
@@ -115,9 +148,19 @@ export interface OrbitState extends Snapshot {
   lastFocusEnd: LastFocusEnd | null;
   dayDate: string;
   flight: Flight | null;
+  host: HostSlice | null;
+  hostRefusal: string | null;
 
   // lifecycle
-  init: (adapter: StorageAdapter, storageError?: string | null) => Promise<void>;
+  init: (adapter: StorageAdapter, storageError?: string | null, opts?: InitOptions) => Promise<void>;
+
+  // host
+  /** Ask the host for the verse again; nothing changes on screen when the host answers "unchanged". */
+  refreshHost: () => Promise<void>;
+  /** Show something on a page of the host's own. */
+  openInHost: (target: Open | undefined) => void;
+  /** What may be done here (everything when standalone). */
+  abilities: () => HostAbilities;
 
   // navigation & UI
   setView: (v: ViewName) => void;
@@ -214,6 +257,8 @@ export function createOrbitStore(deps: StoreDeps = {}): StoreApi<OrbitState> {
   const now = deps.now ?? (() => Date.now());
   const fx = () => deps.effects ?? appEffects;
   let adapter: StorageAdapter = new MemoryAdapter();
+  /** The attached host, if any. Never stored; its records are rebuilt from verse(). */
+  let hostApi: OrbitHost | null = null;
   let lastSaveErrorAt = 0;
 
   return createStore<OrbitState>()((set, get) => {
@@ -232,12 +277,35 @@ export function createOrbitStore(deps: StoreDeps = {}): StoreApi<OrbitState> {
     const save = (p: Promise<unknown>) => {
       p.catch(onSaveError);
     };
-    const put = (table: TableName, rec: { id: string }) => save(adapter.put(table, rec));
-    const putMany = (table: TableName, recs: { id: string }[]) => save(adapter.bulkPut(table, recs));
-    const del = (table: TableName, ids: string[]) => save(adapter.remove(table, ids));
+
+    /* ---------- host helpers ---------- */
+
+    const can = (): HostAbilities => (get()?.host ? abilities(get().host!.info) : STANDALONE);
+    /** The host reference of a record in memory, if a host owns it. */
+    const ownerOf = (table: TableName, id: string): HostRef | undefined => {
+      if (table === 'groups') return get().groups.find((g) => g.id === id)?.host;
+      if (table === 'projects') return get().projects.find((p) => p.id === id)?.host;
+      if (table === 'tasks') return get().tasks.find((t) => t.id === id)?.host;
+      return undefined;
+    };
+    /** A refused change: nothing happens, and a toast says why (once, while it is on screen). */
+    const refuse = (text: string) => {
+      if (!get().toasts.some((t) => t.text === text)) get().toast({ text });
+    };
+    const onlyPosition = (patch: object) => Object.keys(patch).every((k) => k === 'x' || k === 'y');
+
+    // Every write below goes through this one writer (src/host/writer.ts): the single place that decides
+    // where a record goes, and that keeps host-owned records out of storage.
+    const writer = createRecordWriter(() => ({
+      adapter,
+      hosted: hostApi && get().host ? { abilities: can(), ownerOf, now, onPlacement: (pl: Placement) => set({ placements: [...get().placements.filter((x) => x.id !== pl.id), pl] }) } : null,
+    }));
+    const put = (table: TableName, rec: { id: string }) => save(writer.put(table, rec));
+    const putMany = (table: TableName, recs: { id: string }[]) => save(writer.putMany(table, recs));
+    const del = (table: TableName, ids: string[]) => save(writer.remove(table, ids));
     const setFocusRt = (rt: FocusRuntime | null) => {
       set({ focus: rt });
-      save(adapter.setFocus(rt));
+      save(writer.setFocus(rt));
     };
 
     const stamp = <R extends { updatedAt: number }>(r: R): R => ({ ...r, updatedAt: now() });
@@ -346,6 +414,28 @@ export function createOrbitStore(deps: StoreDeps = {}): StoreApi<OrbitState> {
       }
     };
 
+    /** Puts a verse on screen: host records are replaced, ORBIT's own are kept, the selection stays if it can. */
+    const applyVerse = (v: Parameters<typeof adaptVerse>[0]) => {
+      const ad = adaptVerse(v, get().placements);
+      const own = <T extends { host?: HostRef }>(rows: T[]) => rows.filter((r) => !r.host);
+      const groups = [...own(get().groups), ...ad.groups];
+      const projects = [...own(get().projects), ...ad.projects];
+      const tasks = [...own(get().tasks), ...ad.tasks];
+      const sel = get().selection;
+      const still =
+        !sel ||
+        (sel.type === 'task' ? tasks.some((t) => t.id === sel.id) : sel.type === 'project' ? projects.some((p) => p.id === sel.id) : sel.type === 'group' ? groups.some((g) => g.id === sel.id) : ad.extras.beacons.some((b) => b.id === sel.id));
+      set({
+        groups,
+        projects,
+        tasks,
+        selection: still ? sel : null,
+        // deep space's place in a hosted sky comes from placements; it is not saved as a preference
+        prefs: ad.deepSpace ? { ...get().prefs, deepSpace: ad.deepSpace } : get().prefs,
+        host: { ...get().host!, ...ad.extras, verseId: ad.verseId, rev: ad.rev, error: undefined },
+      });
+    };
+
     const ensureParkedTaskIsTodo = (taskId: string | null) => {
       if (!taskId) return;
       const task = get().tasks.find((x) => x.id === taskId);
@@ -367,31 +457,99 @@ export function createOrbitStore(deps: StoreDeps = {}): StoreApi<OrbitState> {
       confirmReq: null,
       toasts: [],
       expanded: [],
-      filter: { query: '', dueSoon: false, highPriority: false, parkedOnly: false, showDone: false, groupId: null },
+      filter: { query: '', dueSoon: false, highPriority: false, parkedOnly: false, showDone: false, groupId: null, hasLinked: false, uses: null, showFinished: false },
       cycle: 0,
       lastFocusEnd: null,
       dayDate: toDateKey(now()),
       flight: null,
+      host: null,
+      hostRefusal: null,
 
       /* ---------- lifecycle ---------- */
 
-      init: async (a, storageError = null) => {
-        adapter = a;
+      init: async (a, storageError = null, opts = {}) => {
+        const hosted = opts.host ?? null;
+        adapter = hosted ? hosted.host.store : a;
+        hostApi = hosted?.host ?? null;
         let snap: Snapshot;
         try {
-          snap = await a.load();
+          snap = { ...emptySnapshot(), ...(await adapter.load()) };
         } catch (e) {
           console.error(e);
           snap = emptySnapshot();
           storageError = `Could not read saved data: ${e instanceof Error ? e.message : String(e)}`;
         }
-        set({ ...snap, ready: true, storageKind: a.kind, storageError, cycle: snap.focus?.cycleCount ?? 0 });
-        get().tick();
+        if (!hosted) {
+          set({ ...snap, ready: true, storageKind: a.kind, storageError, hostRefusal: opts.hostRefusal ?? null, cycle: snap.focus?.cycleCount ?? 0 });
+          get().tick();
+          return;
+        }
+        // Hosted: only what the host keeps for ORBIT comes back from its store (positions and preferences in
+        // this stage); host records come from the verse.
+        const info = hosted.info;
+        const ab = abilities(info);
+        const keep = <K extends keyof Snapshot>(k: K, when: boolean) => (when ? snap[k] : emptySnapshot()[k]);
+        const verseId = info.start && info.verses.some((v) => v.id === info.start) ? info.start : info.verses[0].id;
+        set({
+          ...emptySnapshot(),
+          groups: keep('groups', ab.personal),
+          projects: keep('projects', ab.personal),
+          tasks: keep('tasks', ab.personal),
+          captures: keep('captures', ab.personal),
+          checkpoints: keep('checkpoints', ab.work),
+          sessions: keep('sessions', ab.work),
+          dayItems: keep('dayItems', ab.work),
+          taskWork: keep('taskWork', ab.work),
+          focus: ab.work ? snap.focus : null,
+          placements: snap.placements,
+          prefs: snap.prefs,
+          storageKind: adapter.kind,
+          storageError,
+          hostRefusal: null,
+          host: { info, verseId, rev: '', families: {}, attachments: {}, collections: {}, beacons: [], clusters: [] },
+        });
+        try {
+          const v = await hostApi!.verse(verseId);
+          if (isUnchanged(v)) throw new Error('it answered “unchanged” to the first request');
+          applyVerse(v);
+        } catch (e) {
+          set({ host: { ...get().host!, error: `Could not load from ${ab.name}: ${e instanceof Error ? e.message : String(e)}` } });
+        }
+        set({ ready: true });
       },
+
+      /* ---------- host ---------- */
+
+      refreshHost: async () => {
+        const h = get().host;
+        if (!hostApi || !h) return;
+        try {
+          const v = await hostApi.verse(h.verseId, h.rev || undefined);
+          if (isUnchanged(v)) {
+            if (h.error) set({ host: { ...h, error: undefined } });
+            return;
+          }
+          applyVerse(v);
+        } catch (e) {
+          set({ host: { ...get().host!, error: `Could not refresh from ${can().name}: ${e instanceof Error ? e.message : String(e)}` } });
+        }
+      },
+      openInHost: (target) => {
+        if (!hostApi || !target) return;
+        try {
+          hostApi.open({ kind: target.kind, id: target.id });
+        } catch (e) {
+          get().toast({ tone: 'danger', text: `${can().name} could not open it: ${e instanceof Error ? e.message : String(e)}` });
+        }
+      },
+      abilities: () => can(),
 
       /* ---------- navigation & UI ---------- */
 
-      setView: (view) => set({ view }),
+      setView: (view) => {
+        if (!viewAvailable(can(), view)) return;
+        set({ view });
+      },
       select: (selection) => set({ selection }),
       toast: (t) => {
         const id = uid();
@@ -399,7 +557,10 @@ export function createOrbitStore(deps: StoreDeps = {}): StoreApi<OrbitState> {
       },
       dismissToast: (id) => set({ toasts: get().toasts.filter((t) => t.id !== id) }),
       confirm: (confirmReq) => set({ confirmReq }),
-      setCaptureOpen: (captureOpen) => set({ captureOpen }),
+      setCaptureOpen: (captureOpen) => {
+        if (captureOpen && !can().personal) return refuse(refusal.personal(can()));
+        set({ captureOpen });
+      },
       setSearchOpen: (searchOpen) => set({ searchOpen }),
       setHelpOpen: (helpOpen) => set({ helpOpen }),
       toggleExpanded: (id, force) => {
@@ -417,6 +578,11 @@ export function createOrbitStore(deps: StoreDeps = {}): StoreApi<OrbitState> {
 
       createGroup: (name, color, at) => {
         const t = now();
+        if (!can().personal) {
+          // Refused: the galaxy it would have made is returned but is not in the store.
+          refuse(refusal.personal(can()));
+          return { id: uid(), createdAt: t, updatedAt: t, name, color: color ?? 'violet', x: 0, y: 0 };
+        }
         const taken: Pt[] = get().groups.map((g) => ({ x: g.x, y: g.y }));
         const groupIds = new Set(get().groups.map((g) => g.id));
         if (get().projects.some((p) => !p.groupId || !groupIds.has(p.groupId))) taken.push(get().prefs.deepSpace);
@@ -426,8 +592,14 @@ export function createOrbitStore(deps: StoreDeps = {}): StoreApi<OrbitState> {
         put('groups', g);
         return g;
       },
-      updateGroup: (id, patch) => void patchRow('groups', id, patch),
+      updateGroup: (id, patch) => {
+        const ref = ownerOf('groups', id);
+        // Where a host galaxy sits is ORBIT's to remember (a placement); anything else is the host's.
+        if (ref && !(onlyPosition(patch) || may(can(), ref, 'edit'))) return refuse(refusal.kept(can()));
+        patchRow('groups', id, patch);
+      },
       deleteGroup: (id) => {
+        if (ownerOf('groups', id)) return refuse(refusal.kept(can()));
         const gone = get().groups.find((g) => g.id === id);
         const members = get().projects.filter((p) => p.groupId === id);
         let affected: Project[];
@@ -492,8 +664,14 @@ export function createOrbitStore(deps: StoreDeps = {}): StoreApi<OrbitState> {
       /* ---------- projects ---------- */
 
       createProject: (input) => {
-        if (!input.groupId) claimDeepSpace();
         const t = now();
+        const intoHost = input.groupId ? ownerOf('groups', input.groupId) : undefined;
+        if (!can().personal || intoHost) {
+          // Refused: the system it would have made is returned but is not in the store.
+          refuse(intoHost && can().personal ? refusal.kept(can()) : refusal.personal(can()));
+          return { id: uid(), createdAt: t, updatedAt: t, name: input.name, color: 'violet', icon: 'orbit', description: '', groupId: null, x: 0, y: 0, archived: false };
+        }
+        if (!input.groupId) claimDeepSpace();
         const p: Project = {
           id: uid(),
           createdAt: t,
@@ -514,6 +692,14 @@ export function createOrbitStore(deps: StoreDeps = {}): StoreApi<OrbitState> {
       },
       updateProject: (id, patch) => {
         const cur = get().projects.find((p) => p.id === id);
+        if (cur?.host) {
+          // A host system may be dragged to a new place in its own galaxy; moving it to another galaxy, or
+          // changing anything else about it, is the host's.
+          if ('groupId' in patch && patch.groupId !== cur.groupId && !may(can(), cur.host, 'move')) return refuse(refusal.move(can()));
+          const rest: Partial<Project> = { ...patch };
+          if (rest.groupId === cur.groupId) delete rest.groupId;
+          if (!onlyPosition(rest) && !may(can(), cur.host, 'edit')) return refuse(refusal.kept(can()));
+        }
         if (cur && 'groupId' in patch && patch.groupId !== cur.groupId && !patch.groupId) claimDeepSpace(id);
         if (cur && 'groupId' in patch && patch.groupId !== cur.groupId && patch.x === undefined && patch.y === undefined) {
           // Moving to another galaxy: find it a free orbit there.
@@ -531,8 +717,16 @@ export function createOrbitStore(deps: StoreDeps = {}): StoreApi<OrbitState> {
           .map((p) => ({ x: p.x, y: p.y }));
         return findFreeSpot(0, 0, taken, SYSTEM_SPACING);
       },
-      setDeepSpace: (at) => get().setPrefs({ deepSpace: { x: Math.round(at.x), y: Math.round(at.y) } }),
+      setDeepSpace: (at) => {
+        const deepSpace = { x: Math.round(at.x), y: Math.round(at.y) };
+        if (!get().host) return get().setPrefs({ deepSpace });
+        // Hosted: deep space is placed like a host galaxy (and the preference is not the source of truth).
+        const pl: Placement = { id: placementKey.galaxy(DEEP_SPACE), ...deepSpace, updatedAt: now() };
+        set({ prefs: { ...get().prefs, deepSpace }, placements: [...get().placements.filter((p) => p.id !== pl.id), pl] });
+        put('placements', pl);
+      },
       deleteProject: (id) => {
+        if (ownerOf('projects', id)) return refuse(refusal.kept(can()));
         const taskIds = get()
           .tasks.filter((t) => t.projectId === id)
           .map((t) => t.id);
@@ -558,6 +752,8 @@ export function createOrbitStore(deps: StoreDeps = {}): StoreApi<OrbitState> {
 
       createTask: (input) => {
         const t = now();
+        const into = get().projects.find((p) => p.id === input.projectId);
+        const refused = into?.host ? !may(can(), into.host, 'create') : !can().personal;
         const task: Task = {
           id: uid(),
           createdAt: t,
@@ -578,12 +774,23 @@ export function createOrbitStore(deps: StoreDeps = {}): StoreApi<OrbitState> {
           parkedAt: null,
           example: input.example,
         };
+        if (refused) {
+          // Refused: the task it would have made is returned but is not in the store.
+          refuse(into?.host ? refusal.kept(can()) : refusal.personal(can()));
+          return task;
+        }
         set({ tasks: [...get().tasks, task] });
         put('tasks', task);
         return task;
       },
-      updateTask: (id, patch) => void patchRow('tasks', id, patch),
+      updateTask: (id, patch) => {
+        const ref = ownerOf('tasks', id);
+        if (ref && (!may(can(), ref, 'edit'))) return refuse(refusal.kept(can()));
+        patchRow('tasks', id, patch);
+      },
       deleteTask: (id) => {
+        const ref = ownerOf('tasks', id);
+        if (ref && (!may(can(), ref, 'delete'))) return refuse(refusal.kept(can()));
         if (get().focus?.taskId === id) endSession('stopped');
         const cps = get().checkpoints.filter((c) => c.taskId === id).map((c) => c.id);
         const items = get().dayItems.filter((d) => d.taskId === id).map((d) => d.id);
@@ -606,6 +813,7 @@ export function createOrbitStore(deps: StoreDeps = {}): StoreApi<OrbitState> {
       completeTask: (id) => {
         const task = get().tasks.find((t) => t.id === id);
         if (!task) return;
+        if (task.host && (!may(can(), task.host, 'status'))) return refuse(refusal.kept(can()));
         if (get().focus?.taskId === id) endSession('completed');
         patchRow('tasks', id, { status: 'done', completedAt: now(), parkedAt: null, progress: 100 });
         get().toast({
@@ -614,11 +822,16 @@ export function createOrbitStore(deps: StoreDeps = {}): StoreApi<OrbitState> {
           action: { label: 'Undo', run: () => get().reopenTask(id) },
         });
       },
-      reopenTask: (id) => void patchRow('tasks', id, { status: 'todo', completedAt: null }),
+      reopenTask: (id) => {
+        const ref = ownerOf('tasks', id);
+        if (ref && (!may(can(), ref, 'status'))) return refuse(refusal.kept(can()));
+        patchRow('tasks', id, { status: 'todo', completedAt: null });
+      },
 
       /* ---------- focus ---------- */
 
       startFocus: (o) => {
+        if (o.taskId && !mayWork(can(), ownerOf('tasks', o.taskId))) return refuse(refusal.work(can()));
         const prefs = get().prefs;
         const rt = get().focus;
         const kind = o.kind ?? 'focus';
@@ -687,9 +900,17 @@ export function createOrbitStore(deps: StoreDeps = {}): StoreApi<OrbitState> {
 
       /* ---------- parking ---------- */
 
-      openPark: (park) => set({ park }),
+      openPark: (park) => {
+        if (park && !mayWork(can(), ownerOf('tasks', park.taskId))) return refuse(refusal.work(can()));
+        set({ park });
+      },
       parkTask: (taskId, input, opts) => {
         const t = now();
+        if (!mayWork(can(), ownerOf('tasks', taskId))) {
+          // Refused: the checkpoint it would have made is returned but is not in the store.
+          refuse(refusal.work(can()));
+          return { id: uid(), createdAt: t, updatedAt: t, taskId, doing: '', stoppedAt: '', nextAction: '', notes: '', links: [], timer: null, resumedAt: null, auto: !!opts?.auto };
+        }
         const rt = get().focus;
         let timer: Checkpoint['timer'] = null;
         if (rt && rt.taskId === taskId) {
@@ -716,8 +937,12 @@ export function createOrbitStore(deps: StoreDeps = {}): StoreApi<OrbitState> {
         return cp;
       },
       updateCheckpoint: (id, patch) => void patchRow('checkpoints', id, { ...patch, auto: false }),
-      openResume: (resumeFor) => set({ resumeFor }),
+      openResume: (resumeFor) => {
+        if (resumeFor && !mayWork(can(), ownerOf('tasks', resumeFor))) return refuse(refusal.work(can()));
+        set({ resumeFor });
+      },
       resumeTask: (taskId, timer) => {
+        if (!mayWork(can(), ownerOf('tasks', taskId))) return refuse(refusal.work(can()));
         const cp = latestCheckpoint(taskId);
         const rt = get().focus;
         if (rt && rt.taskId !== taskId) clearForSwitch(taskId);
@@ -738,6 +963,11 @@ export function createOrbitStore(deps: StoreDeps = {}): StoreApi<OrbitState> {
 
       addCapture: (input) => {
         const t = now();
+        if (!can().personal) {
+          // Refused: the capture it would have made is returned but is not in the store.
+          refuse(refusal.personal(can()));
+          return { id: uid(), createdAt: t, updatedAt: t, text: input.text, kind: input.kind ?? 'task', source: input.source ?? 'quick', status: 'inbox', contextTaskId: null, sortedTaskId: null };
+        }
         const c: Capture = {
           id: uid(),
           createdAt: t,
@@ -756,6 +986,11 @@ export function createOrbitStore(deps: StoreDeps = {}): StoreApi<OrbitState> {
       sortCapture: (id, opts) => {
         const c = get().captures.find((x) => x.id === id);
         if (!c) return null;
+        const into = ownerOf('projects', opts.projectId);
+        if (into && (!may(can(), into, 'create'))) {
+          refuse(refusal.kept(can()));
+          return null;
+        }
         const task = get().createTask({ projectId: opts.projectId, title: opts.title ?? c.text });
         patchRow('captures', id, { status: 'sorted', sortedTaskId: task.id });
         if (opts.slot) get().planTask(task.id, toDateKey(now()), opts.slot);
@@ -771,6 +1006,7 @@ export function createOrbitStore(deps: StoreDeps = {}): StoreApi<OrbitState> {
       /* ---------- day plan ---------- */
 
       planTask: (taskId, date, slot, index) => {
+        if (!mayWork(can(), ownerOf('tasks', taskId))) return refuse(refusal.work(can()));
         const existing = get().dayItems.find((d) => d.taskId === taskId && d.date === date);
         if (existing) {
           const inSlot = get().dayItems.filter((d) => d.date === date && d.slot === slot && d.id !== existing.id);
@@ -836,10 +1072,12 @@ export function createOrbitStore(deps: StoreDeps = {}): StoreApi<OrbitState> {
       },
       snapshot: () => {
         const s = get();
+        // Host records are never ORBIT's to back up or keep.
+        const own = <T extends { host?: HostRef }>(rows: T[]) => rows.filter((r) => !r.host);
         return {
-          projects: s.projects,
-          groups: s.groups,
-          tasks: s.tasks,
+          projects: own(s.projects),
+          groups: own(s.groups),
+          tasks: own(s.tasks),
           checkpoints: s.checkpoints,
           sessions: s.sessions,
           captures: s.captures,
@@ -851,10 +1089,13 @@ export function createOrbitStore(deps: StoreDeps = {}): StoreApi<OrbitState> {
         };
       },
       restore: async (snap) => {
+        // With a host attached, replacing everything would replace what the host keeps for ORBIT: not here.
+        if (get().host) throw new Error(refusal.data(can()));
         await adapter.replaceAll(snap); // throws on failure; caller reports it and nothing changes
         set({ ...snap, selection: null, park: null, resumeFor: null, expanded: [], cycle: snap.focus?.cycleCount ?? 0, lastFocusEnd: null });
       },
       loadExample: async () => {
+        if (get().host) return refuse(refusal.data(can()));
         const groupIds = new Set(get().groups.map((g) => g.id));
         const taken: Pt[] = get().groups.map((g) => ({ x: g.x, y: g.y }));
         if (get().projects.some((p) => !p.groupId || !groupIds.has(p.groupId))) taken.push(get().prefs.deepSpace);
@@ -878,6 +1119,7 @@ export function createOrbitStore(deps: StoreDeps = {}): StoreApi<OrbitState> {
         }
       },
       removeExample: async () => {
+        if (get().host) return refuse(refusal.data(can()));
         const s = get().snapshot();
         const exTaskIds = new Set(s.tasks.filter((t) => t.example).map((t) => t.id));
         // Example projects that now hold the user's own tasks are kept as ordinary projects.
@@ -910,6 +1152,7 @@ export function createOrbitStore(deps: StoreDeps = {}): StoreApi<OrbitState> {
         }
       },
       resetAll: async () => {
+        if (get().host) return refuse(refusal.data(can()));
         try {
           await get().restore({ ...emptySnapshot(), prefs: { ...DEFAULT_PREFS, theme: get().prefs.theme } });
           get().toast({ text: 'All ORBIT data on this device was erased.' });
@@ -919,6 +1162,13 @@ export function createOrbitStore(deps: StoreDeps = {}): StoreApi<OrbitState> {
       },
     };
   });
+}
+
+/** Views that make sense with what the host provides (all of them when standalone). */
+export function viewAvailable(a: HostAbilities, v: ViewName): boolean {
+  if (v === 'today') return a.work;
+  if (v === 'inbox') return a.personal;
+  return true;
 }
 
 /* ---------------- app singleton + hook ---------------- */
