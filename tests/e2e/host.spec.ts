@@ -1,4 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
+import { readFileSync } from 'node:fs';
 
 /*
  * ORBIT embedded in a host application (src/host). The read-only demo host (?orbit-host=demo-readonly) has
@@ -319,4 +320,86 @@ test('editable demo host: a locked host shows a banner; working state still work
   await expect(banner).toHaveCount(0);
   await expect(panel.getByLabel('Task title')).not.toHaveAttribute('readonly', '');
   await expect(panel.getByRole('button', { name: 'Complete', exact: true })).toBeVisible();
+});
+
+test('editable demo host with personal records: own galaxy beside the host’s, one Today, a backup without host records, Move to host', async ({ page }, info) => {
+  test.skip(info.project.name === 'phone', 'desktop canvas');
+  await page.addInitScript(STORAGE_SPY);
+  await page.goto('/?orbit-host=demo#universe');
+  await expect(page.getByRole('button', { name: /^Garden galaxy/ })).toBeVisible();
+
+  // a galaxy, a system and a task of ORBIT's own, made as in standalone ORBIT
+  await page.getByRole('button', { name: 'New system or galaxy' }).click();
+  await page.getByRole('menuitem', { name: 'New galaxy' }).click();
+  await page.getByPlaceholder('e.g. Research, Teaching, Home').fill('Reading');
+  await page.getByRole('button', { name: 'Create galaxy' }).click();
+  await page.getByRole('button', { name: 'New system or galaxy' }).click();
+  await page.getByRole('menuitem', { name: 'New system in Reading' }).click();
+  await page.getByPlaceholder('e.g. Thesis chapter 3').fill('Novels');
+  await page.getByRole('button', { name: 'Create project' }).click();
+  const projectPanel = page.getByRole('complementary', { name: 'Project details' });
+  await projectPanel.getByLabel('New task title').fill('Finish the long one');
+  await projectPanel.getByLabel('New task title').press('Enter');
+  await projectPanel.getByRole('button', { name: /Finish the long one/ }).click();
+  const panel = page.getByRole('complementary', { name: 'Task details' });
+  await panel.getByRole('button', { name: 'Plan today' }).click();
+  await page.getByRole('menuitem', { name: 'Morning' }).click();
+  await expect.poll(() => page.evaluate(async () => (await (window as unknown as HostWindow).orbitHost.store.load() as unknown as { groups: { name: string }[] }).groups.map((g) => g.name))).toEqual(['Reading']);
+
+  // it sits beside the host's galaxies
+  await page.keyboard.press('Escape');
+  await page.getByRole('button', { name: 'Whole universe (0)' }).click();
+  await expect(page.getByRole('button', { name: /^Reading galaxy/ })).toBeVisible();
+  await expect(page.getByRole('button', { name: /^Garden galaxy/ })).toBeVisible();
+
+  // a host task on the same Today
+  const host = await openTask(page, /^Garden galaxy/, /^Greenhouse\./, /^Sow tomato trays/);
+  await host.getByRole('button', { name: 'Plan today' }).click();
+  await page.getByRole('menuitem', { name: 'Morning' }).click();
+  await page.goto('/?orbit-host=demo#today');
+  await expect(page.getByText('Finish the long one').first()).toBeVisible();
+  await expect(page.getByText('Sow tomato trays').first()).toBeVisible();
+  // the host's dates that are close, above the day; not cards
+  const coming = page.getByRole('region', { name: 'Coming up' });
+  await expect(coming.getByText('Seedlings out')).toBeVisible();
+  await expect(coming.getByText('Frost check')).toBeVisible();
+  await expect(coming.getByText('Spring planting')).toHaveCount(0);
+  await coming.getByText('Seedlings out').click();
+  await expect(page.getByRole('complementary', { name: 'Date details' })).toBeVisible();
+
+  // a backup holds ORBIT's own records and working state, never the host's records
+  await page.goto('/?orbit-host=demo#preferences');
+  await expect(page.getByText(/Records kept by Demo host are not in this file/)).toBeVisible();
+  await expect(page.getByRole('button', { name: /Load example workspace/ })).toHaveCount(0);
+  const [download] = await Promise.all([page.waitForEvent('download'), page.getByRole('button', { name: 'Download backup' }).click()]);
+  const file = JSON.parse(readFileSync((await download.path())!, 'utf8'));
+  expect(file.schemaVersion).toBe(5);
+  expect(file.groups.map((g: { name: string }) => g.name)).toEqual(['Reading']);
+  expect(file.projects.map((p: { name: string }) => p.name)).toEqual(['Novels']);
+  expect(file.tasks.map((t: { title: string }) => t.title)).toEqual(['Finish the long one']);
+  expect(JSON.stringify([file.groups, file.projects, file.tasks])).not.toMatch(/"host"|g-garden|s-greenhouse|t-trays|Garden|Greenhouse/);
+  expect(file.dayItems.map((d: { taskId: string }) => d.taskId)).toContain('t-trays');
+
+  // Move to Demo host…: ORBIT's confirm first, then the host's own dialog (the demo takes all), then the task is the host's
+  await page.goto('/?orbit-host=demo#today');
+  await page.getByText('Finish the long one').first().click();
+  await page.getByRole('complementary', { name: 'Task details' }).getByTitle('Open project').click();
+  await projectPanel.getByRole('button', { name: 'More actions' }).click();
+  await page.getByRole('menuitem', { name: 'Move to Demo host…' }).click();
+  const dialog = page.getByRole('dialog', { name: 'Move “Novels” to Demo host?' });
+  await expect(dialog).toContainText('title, notes, due date, priority and whether it is done');
+  await expect(dialog.getByRole('button', { name: 'Download a backup first' })).toBeVisible();
+  await dialog.getByRole('button', { name: 'Continue in Demo host' }).click();
+  await expect(page.getByText('“Novels” is now kept by Demo host (1 task).')).toBeVisible();
+  const taken = await hostDo(page, (h) => h.current().planets.find((p) => p.title === 'Finish the long one'));
+  expect(taken).toBeDefined();
+  const saved = await page.evaluate(async () => (await (window as unknown as HostWindow).orbitHost.store.load()) as unknown as { tasks: unknown[]; projects: unknown[]; dayItems: { taskId: string }[]; taskWork: { id: string }[] });
+  expect(saved.tasks).toEqual([]);
+  expect(saved.projects).toEqual([]);
+  expect(saved.dayItems.map((d) => d.taskId)).toContain(taken!.id);
+  expect(saved.taskWork.map((w) => w.id)).toContain(taken!.id);
+  // still on today's plan, now as the host's task
+  await expect(page.getByText('Finish the long one').first()).toBeVisible();
+  expect(await page.evaluate(() => (window as unknown as HostWindow).__idbOpens)).toBe(0);
+  expect(await page.evaluate(() => (window as unknown as HostWindow).__lsUses)).toBe(0);
 });
