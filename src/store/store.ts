@@ -479,6 +479,8 @@ export function createOrbitStore(deps: StoreDeps = {}): StoreApi<OrbitState> {
           snap = emptySnapshot();
           storageError = `Could not read saved data: ${e instanceof Error ? e.message : String(e)}`;
         }
+        // Preferences may come from an older ORBIT, or from a host's store: fill in anything missing.
+        snap.prefs = { ...DEFAULT_PREFS, ...(snap.prefs ?? {}), layers: { ...DEFAULT_PREFS.layers, ...(snap.prefs?.layers ?? {}) } };
         if (!hosted) {
           set({ ...snap, ready: true, storageKind: a.kind, storageError, hostRefusal: opts.hostRefusal ?? null, cycle: snap.focus?.cycleCount ?? 0 });
           get().tick();
