@@ -1,8 +1,10 @@
 import { expect, test, type Page } from '@playwright/test';
 
 /*
- * ORBIT embedded in a host application (src/host). The demo host (?orbit-host=demo) is read-only: every
- * capability is false. A second test proves detection of a host defined on the PARENT frame.
+ * ORBIT embedded in a host application (src/host). The read-only demo host (?orbit-host=demo-readonly) has
+ * every capability false; the editable one (?orbit-host=demo) lets host tasks be changed and keeps ORBIT's
+ * working state for them (its store lasts for the tab, in the demo host's own sessionStorage). Another test
+ * proves detection of a host defined on the PARENT frame.
  */
 
 /** Counts IndexedDB opens and localStorage use in every frame: a hosted ORBIT must do neither. */
@@ -31,8 +33,20 @@ const STORAGE_SPY = () => {
 type HostWindow = Window & {
   orbitHost: {
     opened: { kind: string; id: string }[];
-    store: { load(): Promise<{ placements: { id: string; x: number; y: number }[]; prefs: { layers: { moons: boolean } } }> };
+    store: {
+      load(): Promise<{
+        placements: { id: string; x: number; y: number }[];
+        prefs: { layers: { moons: boolean } };
+        taskWork: { id: string; parked?: boolean }[];
+        checkpoints: { taskId: string; nextAction: string }[];
+        focus: { taskId: string | null } | null;
+      }>;
+    };
     change(fn: (v: { planets: { id: string; title: string }[] }) => void): void;
+    current(): { planets: { id: string; title: string; status?: string; dropped?: boolean }[] };
+    log: { op: string; args: unknown[] }[];
+    refuseNext(reason: string): void;
+    setLocked(text?: string): void;
     calls: { verse: number; unchanged: number };
   };
   __idbOpens: number;
@@ -47,7 +61,7 @@ async function center(page: Page, name: RegExp) {
 test('demo host: read-only sky, linked items, layers, and positions kept across a refresh', async ({ page }, info) => {
   test.skip(info.project.name === 'phone', 'desktop canvas');
   await page.addInitScript(STORAGE_SPY);
-  await page.goto('/?orbit-host=demo#universe');
+  await page.goto('/?orbit-host=demo-readonly#universe');
 
   // the host's galaxies, without the finished one
   await expect(page.getByRole('button', { name: /^Garden galaxy/ })).toBeVisible();
@@ -193,4 +207,116 @@ test('a host speaking another protocol is refused with a reason, and ORBIT runs 
   await expect(page.getByText('This build of ORBIT speaks host protocol 1; the host offered 2.')).toBeVisible();
   await expect(page.getByPlaceholder('e.g. Thesis, Website, House move')).toBeVisible();
   expect(await page.evaluate(() => (window as unknown as HostWindow).__idbOpens)).toBe(0);
+});
+
+const hostDo = <T,>(page: Page, fn: (h: HostWindow['orbitHost']) => T | Promise<T>) =>
+  page.evaluate(`(${fn.toString()})(window.orbitHost)`) as Promise<T>;
+const planetOf = (page: Page, id: string) => page.evaluate((i) => (window as unknown as HostWindow).orbitHost.current().planets.find((p) => p.id === i), id);
+
+async function openTask(page: Page, galaxy: RegExp, system: RegExp, task: RegExp) {
+  await page.getByRole('button', { name: galaxy }).click();
+  await page.getByRole('button', { name: system }).click();
+  await page.getByRole('button', { name: task }).click();
+  return page.getByRole('complementary', { name: 'Task details' });
+}
+
+test('editable demo host: edit a title, complete with Undo, a refusal undone, delete with a reason', async ({ page }, info) => {
+  test.skip(info.project.name === 'phone', 'desktop canvas');
+  await page.addInitScript(STORAGE_SPY);
+  await page.goto('/?orbit-host=demo#universe');
+  const panel = await openTask(page, /^Garden galaxy/, /^Vegetable beds\./, /^Turn the compost/);
+  const title = panel.getByLabel('Task title');
+  await expect(title).not.toHaveAttribute('readonly', '');
+  await expect(panel.getByText(/stay on this computer, with ORBIT/)).toBeVisible();
+
+  // a title edit goes to the host as a patch of just that field
+  await title.fill('Turn the compost heap');
+  await title.press('Enter');
+  await expect.poll(async () => (await planetOf(page, 't-compost'))?.title).toBe('Turn the compost heap');
+  expect(await hostDo(page, (h) => h.log.filter((l) => l.op === 'update').map((l) => l.args))).toEqual([['t-compost', { title: 'Turn the compost heap' }]]);
+
+  // the host refuses: the change is undone on screen and its reason is shown
+  await hostDo(page, (h) => h.refuseNext('Titles are frozen this week.'));
+  await title.fill('Something else');
+  await title.press('Enter');
+  await expect(page.getByText('Titles are frozen this week.')).toBeVisible();
+  await expect(title).toHaveValue('Turn the compost heap');
+  expect((await planetOf(page, 't-compost'))?.title).toBe('Turn the compost heap');
+
+  // complete, then Undo from the toast
+  await panel.getByRole('button', { name: 'Complete', exact: true }).click();
+  await expect.poll(async () => (await planetOf(page, 't-compost'))?.status).toBe('done');
+  await expect(panel.getByText('Done', { exact: true })).toBeVisible();
+  await page.getByRole('button', { name: 'Undo' }).click();
+  await expect.poll(async () => (await planetOf(page, 't-compost'))?.status).toBe('todo');
+  await expect(panel.getByRole('button', { name: 'Complete', exact: true })).toBeVisible();
+
+  // delete: the host asks for a reason, given in ORBIT's own confirm dialog
+  await panel.getByRole('button', { name: 'More actions' }).click();
+  await page.getByRole('menuitem', { name: 'Delete task' }).click();
+  const dialog = page.getByRole('dialog', { name: 'Delete this task?' });
+  const confirm = dialog.getByRole('button', { name: 'Delete task' });
+  await expect(confirm).toBeDisabled();
+  await dialog.getByLabel('Reason').fill('Composted already');
+  await confirm.click();
+  await expect(page.getByRole('button', { name: /^Turn the compost heap/ })).toHaveCount(0);
+  await expect.poll(async () => planetOf(page, 't-compost')).toBeUndefined();
+  expect(await hostDo(page, (h) => h.log.find((l) => l.op === 'remove')?.args)).toEqual(['t-compost', 'Composted already']);
+
+  // hosted: never IndexedDB, never localStorage
+  expect(await page.evaluate(() => (window as unknown as HostWindow).__idbOpens)).toBe(0);
+  expect(await page.evaluate(() => (window as unknown as HostWindow).__lsUses)).toBe(0);
+});
+
+test('editable demo host: park a host task, reload with the same host store, resume', async ({ page }, info) => {
+  test.skip(info.project.name === 'phone', 'desktop canvas');
+  await page.addInitScript(STORAGE_SPY);
+  await page.goto('/?orbit-host=demo#universe');
+  const panel = await openTask(page, /^Garden galaxy/, /^Greenhouse\./, /^Sow tomato trays/);
+  await panel.getByRole('button', { name: 'Park', exact: true }).click();
+  const sheet = page.getByRole('dialog', { name: /^Park/ });
+  await sheet.getByLabel('My next action').fill('Water the trays');
+  await sheet.getByRole('button', { name: 'Park', exact: true }).click();
+  await expect(panel.getByText('Parked', { exact: true })).toBeVisible();
+  await expect.poll(() => page.evaluate(async () => (await (window as unknown as HostWindow).orbitHost.store.load()).taskWork.find((w) => w.id === 't-trays')?.parked)).toBe(true);
+  // parking is ORBIT's: the host was not asked to change anything
+  expect(await hostDo(page, (h) => h.log)).toEqual([]);
+
+  await page.reload();
+  await expect(page.locator('#main')).toBeVisible();
+  const dock = page.getByRole('contentinfo', { name: 'Working memory dock' });
+  await dock.getByRole('button', { name: /Sow tomato trays/ }).click();
+  const welcome = page.getByRole('dialog', { name: 'Welcome back' });
+  await expect(welcome.getByText('Water the trays')).toBeVisible();
+  await welcome.getByRole('button', { name: /^Start focus/ }).click();
+  await expect(dock.getByText('Parked tasks wait here with your place saved.')).toBeVisible();
+  await expect
+    .poll(() => page.evaluate(async () => {
+      const s = await (window as unknown as HostWindow).orbitHost.store.load();
+      return { parked: s.taskWork.find((w) => w.id === 't-trays')?.parked, focus: s.focus?.taskId };
+    }))
+    .toEqual({ parked: false, focus: 't-trays' });
+  expect(await page.evaluate(() => (window as unknown as HostWindow).__idbOpens)).toBe(0);
+  expect(await page.evaluate(() => (window as unknown as HostWindow).__lsUses)).toBe(0);
+});
+
+test('editable demo host: a locked host shows a banner; working state still works; it lifts on refresh', async ({ page }, info) => {
+  test.skip(info.project.name === 'phone', 'desktop canvas');
+  await page.goto('/?orbit-host=demo&locked=Stocktaking until noon.#universe');
+  const banner = page.getByRole('status', { name: 'Changes paused' });
+  await expect(banner).toContainText('Stocktaking until noon.');
+  const panel = await openTask(page, /^Garden galaxy/, /^Vegetable beds\./, /^Turn the compost/);
+  await expect(panel.getByLabel('Task title')).toHaveAttribute('readonly', '');
+  await expect(panel.getByRole('button', { name: 'Complete', exact: true })).toHaveCount(0);
+  await expect(panel.getByRole('button', { name: 'More actions' })).toHaveCount(0);
+  await expect(panel.getByRole('button', { name: /^Start focus/ })).toBeVisible();
+  await expect(panel.getByRole('button', { name: 'Park', exact: true })).toBeVisible();
+
+  await page.evaluate(() => {
+    (window as unknown as HostWindow).orbitHost.setLocked();
+    window.dispatchEvent(new Event('focus'));
+  });
+  await expect(banner).toHaveCount(0);
+  await expect(panel.getByLabel('Task title')).not.toHaveAttribute('readonly', '');
+  await expect(panel.getByRole('button', { name: 'Complete', exact: true })).toBeVisible();
 });
