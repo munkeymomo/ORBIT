@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
-import { ChevronDown, ChevronRight, CircleHelp, Lock, Maximize, Minus, Orbit, Pause, Plus, Search, SlidersHorizontal, Sparkles, Check, CornerLeftUp, X, ExternalLink } from 'lucide-react';
+import { ChevronDown, ChevronRight, CircleDashed, CircleHelp, Diamond, Lock, Maximize, Minus, Moon, Orbit, Pause, Plus, Search, SlidersHorizontal, Sparkles, Check, CornerLeftUp, X, ExternalLink } from 'lucide-react';
 import { orbit, useOrbit } from '../../store/store';
 import { colorHex, inkOn } from '../../lib/colors';
 import { useHotkeys } from '../../lib/hooks';
@@ -34,6 +34,28 @@ import {
   type View,
 } from './space';
 import { SpacePainter } from './SpacePainter';
+import { moonListPlacement, outsideSystem, type Measure, type OrbitLabel } from './labels';
+import { layoutSky, STAR_NAME_W } from './skyLabels';
+import { requestPanelSection } from '../task/panelSection';
+
+/** Text widths for label layout, measured with the same font the labels use (an estimate without a canvas). */
+let measureCtx: CanvasRenderingContext2D | null | undefined;
+const measureWith =
+  (font: string, per: number): Measure =>
+  (t: string) => {
+    if (measureCtx === undefined) {
+      try {
+        measureCtx = typeof document !== 'undefined' && !/jsdom/i.test(navigator.userAgent) ? document.createElement('canvas').getContext('2d') : null;
+      } catch {
+        measureCtx = null;
+      }
+    }
+    if (!measureCtx) return t.length * per;
+    measureCtx.font = font;
+    return measureCtx.measureText(t).width;
+  };
+const measureLabel = measureWith('400 11.5px Inter Variable, system-ui, sans-serif', 6.1);
+const measureDate = measureWith('600 11px Inter Variable, system-ui, sans-serif', 6.2);
 
 const VIEW_KEY = 'orbit-space-view';
 type Target = { kind: 'universe' } | { kind: 'galaxy'; id: string } | { kind: 'system'; id: string };
@@ -141,7 +163,7 @@ export function UniverseCanvas({ onNewSystem, onNewGalaxy }: { onNewSystem: (gal
     }
     for (const g of gs) {
       const s = g.systems.find((x) => x.pv.project.id === t.id);
-      if (s) return fitSystem(s, sz);
+      if (s) return fitSystem(s, sz, measureDate);
     }
     return null;
   }, []);
@@ -586,6 +608,12 @@ export function UniverseCanvas({ onNewSystem, onNewGalaxy }: { onNewSystem: (gal
     if (ctx.galaxy?.id === g.id && !ctx.system && !g.virtual) select({ type: 'group', id: g.id });
     else flyTo({ kind: 'galaxy', id: g.id });
   };
+  /** The system's panel, scrolled to what it holds that no task uses (its belt). */
+  const showBelt = (projectId: string) => {
+    if (suppressClick.current) return;
+    requestPanelSection(projectId, 'belt');
+    select({ type: 'project', id: projectId });
+  };
   const onPlanetClick = (s: SystemPlace, taskId: string) => {
     select({ type: 'task', id: taskId });
     if (ctx.system?.pv.project.id !== s.pv.project.id) flyTo({ kind: 'system', id: s.pv.project.id });
@@ -597,6 +625,22 @@ export function UniverseCanvas({ onNewSystem, onNewGalaxy }: { onNewSystem: (gal
   const toS = (wx: number, wy: number) => [wx * k + (view?.x ?? 0), wy * k + (view?.y ?? 0)] as const;
   const onScreen = (sx: number, sy: number, r: number) => sx + r > -40 && sy + r > -40 && sx - r < size.w + 40 && sy - r < size.h + 40;
   const query = filter.query.trim();
+  const selectedTask = selection?.type === 'task' ? selection.id : null;
+  // a narrow canvas (e.g. with the detail panel open): the toolbar keeps to one row with icons
+  const compact = size.w > 0 && size.w < 1180;
+  const mini = minimapSize(size.w);
+  // the corners the minimap and the zoom control take: no planet name goes under them
+  const ui = useMemo(
+    () => (size.w ? [{ x: 8, y: size.h - 16 - mini.h - 14, w: mini.w + 22, h: mini.h + 30 }, { x: size.w - 200, y: size.h - 70, w: 200, h: 70 }] : []),
+    [size.w, size.h, mini.w, mini.h],
+  );
+  const sky = useMemo(
+    () =>
+      view && size.w
+        ? layoutSky({ galaxies, view, size, universeLevel: level === 'universe', selectedTask, today, beacons: layers.beacons, measure: measureLabel, measureBold: measureDate, ui })
+        : { planets: new Map<string, OrbitLabel>(), crowded: new Set<string>() },
+    [galaxies, view, size, level, selectedTask, today, layers.beacons, ui],
+  );
 
   return (
     <div data-theme="dark" className="absolute inset-0 text-text">
@@ -628,6 +672,8 @@ export function UniverseCanvas({ onNewSystem, onNewGalaxy }: { onNewSystem: (gal
             families={host?.families}
             clusters={host?.clusters}
             layers={layers}
+            planetLabels={sky.planets}
+            crowded={sky.crowded}
           />
         )}
 
@@ -670,11 +716,47 @@ export function UniverseCanvas({ onNewSystem, onNewGalaxy }: { onNewSystem: (gal
                   k={k}
                   selected={selection?.type === 'project' && selection.id === s.pv.project.id}
                   current={ctx.system?.pv.project.id === s.pv.project.id}
+                  close={k >= LOD.planets && !s.busy}
+                  faded={ctx.system?.pv.project.id !== s.pv.project.id && sy - clamp(s.pv.radius * k, 9, 66) < (size.top ?? 76)}
                   dimmed={dim && !s.pv.matches}
                   dragging={drag?.kind === 'system' && drag.id === s.pv.project.id}
                   onPointerDown={(e) => startDrag(e, 'system', s.pv.project.id, s.x, s.y, g.id)}
                   onClick={() => onStarClick(s)}
                 />
+              );
+            }),
+          )}
+
+        {view &&
+          layers.belts &&
+          k >= LOD.planets &&
+          level !== 'universe' &&
+          galaxies.flatMap((g) =>
+            g.systems.map((s) => {
+              if (!s.belt) return null;
+              const [sx, sy] = toS(s.x, s.y);
+              const R = s.belt.r * k;
+              if (!onScreen(sx, sy, R + 40)) return null;
+              const band = Math.max(14, (s.belt.haze ? 34 : 20) * k);
+              const open = () => showBelt(s.pv.project.id);
+              const label = `${s.belt.collection.total} items held here that no task uses yet. Open the list.`;
+              return (
+                <div key={`belt-${s.pv.project.id}`} className="contents">
+                  {/* the belt itself: only its band takes clicks */}
+                  <svg className="pointer-events-none absolute z-[17] overflow-visible" style={{ left: sx, top: sy }} width={1} height={1} aria-hidden>
+                    <circle r={R} fill="none" stroke="transparent" strokeWidth={band} className="pointer-events-[stroke] cursor-pointer" style={{ pointerEvents: 'stroke' }} onPointerDown={(e) => e.stopPropagation()} onClick={open}>
+                      <title>{label}</title>
+                    </circle>
+                  </svg>
+                  <button
+                    aria-label={label}
+                    title="Open the list in the system’s panel"
+                    onPointerDown={(e) => e.stopPropagation()}
+                    onClick={open}
+                    className="absolute z-[19] h-9 w-[360px] -translate-x-1/2 rounded-lg outline-none hover:bg-white/5 focus-visible:ring-2 focus-visible:ring-accent"
+                    style={{ left: sx, top: sy + R + 14 * Math.max(1, k) - 6 }}
+                  />
+                </div>
               );
             }),
           )}
@@ -739,8 +821,7 @@ export function UniverseCanvas({ onNewSystem, onNewGalaxy }: { onNewSystem: (gal
                     d={clamp(sl.d * k, 14, 64)}
                     lightAngle={Math.atan2(-sl.y, -sl.x)}
                     today={today}
-                    showLabel={k >= LOD.planetLabels}
-                    labelAbove={sl.y < -10}
+                    label={sky.planets.get(tv.task.id)}
                     selected={selection?.type === 'task' && selection.id === tv.task.id}
                     dimmed={dim && (!s.pv.matches || ((!!query || !!filter.uses) && !tv.matches))}
                     onClick={() => onPlanetClick(s, tv.task.id)}
@@ -755,29 +836,44 @@ export function UniverseCanvas({ onNewSystem, onNewGalaxy }: { onNewSystem: (gal
                 const d = clamp(sl.d * k, 14, 64);
                 const px = sx + sl.x * k;
                 // outward from the star, clear of the planet's name, and inside the view
-                const off = Math.max(d / 2 + 26, 96);
-                const roomRight = size.w - (px + off) - 12;
-                const roomLeft = px - off - 12;
-                const left = sl.x < 0 ? roomLeft >= 150 || roomLeft >= roomRight : roomRight < 150 && roomLeft > roomRight;
+                // beside the planet, clear of its name; on the side away from the detail panel (on the right) when
+                // there is room, inside the canvas, and never wider than a short list needs
+                const lab = sky.planets.get(s.pv.tasks[selIdx].task.id);
+                const off = Math.max(d / 2 + 18, lab?.shown && (lab.side === 'left' || lab.side === 'right') ? d / 2 + 14 + lab.rect.w : 0, 40);
+                // the list goes outside the system (past its outer orbit or belt) where it fits, with a line to its
+                // planet; only when nowhere outside fits does it sit beside the planet (away from the panel)
                 const rows = Math.min(selMoons.items.length, 8) + (selMoons.items.length > 8 || selMoons.more ? 1 : 0);
-                const h = rows * 31;
-                const top = clamp(sy + sl.y * k - h / 2, (size.top ?? 76) + 4, Math.max((size.top ?? 76) + 4, size.h - h - 70));
+                const h = rows * 31 + (selMoons.items.length > 8 || selMoons.more ? 14 : 0);
+                const outer = (s.belt ? s.belt.r + 26 : (s.rings.at(-1) ?? 0) + 30) * k;
+                const py = sy + sl.y * k;
+                const out = outsideSystem({ sx, sy, py, outer, canvasW: size.w, canvasH: size.h, top: size.top ?? 76, w: 230, h, avoid: ui });
+                const near = moonListPlacement({ x: px, off, canvasW: size.w, panelRight: !!selection, cap: 240 });
+                const left = out ? out.left : near.left;
+                const maxW = out ? out.box.w : near.maxW;
+                const anchor = out ? (out.left ? out.box.x + out.box.w : out.box.x) : px;
+                const top = out ? out.box.y : clamp(py - h / 2, (size.top ?? 76) + 4, Math.max((size.top ?? 76) + 4, size.h - h - 76));
+                const lead = out
+                  ? { from: { x: px, y: py }, to: { x: out.left ? out.box.x + out.box.w : out.box.x, y: Math.min(Math.max(py, out.box.y + 12), out.box.y + h - 12) } }
+                  : undefined;
                 nodes.push(
                   <MoonChips
                     key={`moons-${s.pv.tasks[selIdx].task.id}`}
                     set={selMoons}
                     families={host?.families ?? {}}
-                    x={px}
+                    x={anchor}
                     top={top}
-                    off={off}
+                    off={out ? 0 : off}
                     left={left}
-                    maxW={clamp(left ? roomLeft : roomRight, 150, 280)}
+                    maxW={maxW}
+                    lead={lead}
+                    leadFrom={d / 2 + 6}
                     hostName={can.name}
                   />,
                 );
               }
               const add = s.pv.canAdd ? s.slots[s.slots.length - 1] : undefined;
-              if (add)
+              // nothing to click is left under the toolbar
+              if (add && sy + add.y * k > (size.top ?? 76))
                 nodes.push(
                   <QuickAddSlot
                     key={`add-${s.pv.project.id}`}
@@ -797,19 +893,34 @@ export function UniverseCanvas({ onNewSystem, onNewGalaxy }: { onNewSystem: (gal
         {view &&
           layers.beacons &&
           galaxies.flatMap((g) => {
-            const spots: { b: Beacon; x: number; y: number }[] = [];
+            const spots: { b: Beacon; x: number; y: number; owner: string; first: boolean; n: number; group: boolean }[] = [];
             const [gx, gy] = toS(g.x, g.y);
             if (!onScreen(gx, gy, g.r * k * 1.2)) return [];
             g.beacons.forEach((b, i) => {
               const p = galaxyBeaconSpot(g, i);
-              spots.push({ b, x: p.x, y: p.y });
+              spots.push({ b, x: p.x, y: p.y, owner: g.id, first: i === 0, n: g.beacons.length, group: true });
             });
             if (k >= LOD.systems && level !== 'universe')
-              for (const s of g.systems) s.beacons.forEach((b, i) => spots.push({ b, ...systemBeaconSpot(s, i) }));
-            return spots.map(({ b, x, y }) => {
+              for (const s of g.systems) s.beacons.forEach((b, i) => spots.push({ b, ...systemBeaconSpot(s, i), owner: s.pv.project.id, first: i === 0, n: s.beacons.length, group: false }));
+            return spots.flatMap(({ b, x, y, owner, first, n, group }) => {
               const [bx, by] = toS(x, y);
-              if (!onScreen(bx, by, 10)) return null;
-              return (
+              if (!onScreen(bx, by, 10)) return [];
+              // dates too close together to label one by one: "n dates" opens the panel that lists them
+              const count =
+                first && sky.crowded.has(owner) ? (
+                  <button
+                    key={`bc-${owner}`}
+                    aria-label={`${n} dates. Open the list.`}
+                    title={`${n} dates: open the list`}
+                    onPointerDown={(e) => e.stopPropagation()}
+                    onClick={() => select({ type: group ? 'group' : 'project', id: owner })}
+                    className="absolute z-[21] h-5 -translate-y-1/2 rounded-md outline-none hover:bg-white/10 focus-visible:ring-2 focus-visible:ring-accent"
+                    style={{ left: bx + 6, top: by, width: measureDate(`${n} dates`) + 10 }}
+                  />
+                ) : null;
+              return [
+                count,
+                (
                 <button
                   key={`b-${b.id}`}
                   data-beacon={b.id}
@@ -820,7 +931,8 @@ export function UniverseCanvas({ onNewSystem, onNewGalaxy }: { onNewSystem: (gal
                   className={cx('absolute z-[21] h-5 w-5 -translate-x-1/2 -translate-y-1/2 rounded-md outline-none hover:ring-2 hover:ring-white/60 focus-visible:ring-2 focus-visible:ring-accent', selection?.type === 'beacon' && selection.id === b.id && 'ring-2 ring-white/80')}
                   style={{ left: bx, top: by }}
                 />
-              );
+                ),
+              ];
             });
           })}
 
@@ -830,11 +942,17 @@ export function UniverseCanvas({ onNewSystem, onNewGalaxy }: { onNewSystem: (gal
       </div>
 
       {/* ---------- chrome ---------- */}
-      <div ref={chrome} data-ui className="pointer-events-none absolute inset-x-0 top-0 flex flex-wrap items-start gap-2 p-3 md:p-4">
-        <Breadcrumbs ctx={ctx} galaxies={galaxies} onFly={flyTo} onUp={goUp} />
+      <div ref={chrome} data-ui className="pointer-events-none absolute inset-x-0 top-0 flex flex-nowrap items-start gap-2 p-3 md:p-4">
+        <Breadcrumbs ctx={ctx} galaxies={galaxies} onFly={flyTo} onUp={goUp} compact={compact} />
         <div className="flex-1" />
-        <div className="pointer-events-auto flex flex-wrap items-center justify-end gap-2">
-          <div className="flex h-10 w-40 items-center gap-2 rounded-xl border border-line bg-surface/80 px-3 shadow-panel backdrop-blur-xl focus-within:border-accent xl:w-56">
+        <div className="pointer-events-auto flex shrink-0 flex-nowrap items-center justify-end gap-2">
+          <div
+            className={cx(
+              'flex h-10 items-center gap-2 rounded-xl border border-line bg-surface/80 px-3 shadow-panel backdrop-blur-xl transition-[width] focus-within:border-accent',
+              compact ? (filter.query ? 'w-44' : 'w-10 cursor-text focus-within:w-44') : 'w-40 xl:w-56',
+            )}
+            onClick={(e) => e.currentTarget.querySelector('input')?.focus()}
+          >
             <Search size={16} className="shrink-0 text-faint" />
             <input
               value={filter.query}
@@ -850,8 +968,8 @@ export function UniverseCanvas({ onNewSystem, onNewGalaxy }: { onNewSystem: (gal
               </button>
             )}
           </div>
-          {can.hosted && <LayerSwitches />}
-          <FiltersButton hosted={can.hosted} hasFinished={groups.some((g) => g.host?.finished)} />
+          {can.hosted && <LayerSwitches compact={compact} />}
+          <FiltersButton hosted={can.hosted} hasFinished={groups.some((g) => g.host?.finished)} compact={compact} />
           <div className="relative">
             <IconButton label="What the shapes mean" variant="secondary" active={legend} onClick={() => setLegend((l) => !l)} className="bg-surface/80 backdrop-blur-xl">
               <CircleHelp size={18} />
@@ -867,7 +985,7 @@ export function UniverseCanvas({ onNewSystem, onNewGalaxy }: { onNewSystem: (gal
             label="Create"
             trigger={(p) => (
               <button {...p} aria-label="New system or galaxy" title="New system or galaxy" className="inline-flex h-10 items-center gap-1.5 rounded-xl bg-accent px-3.5 text-sm font-medium text-white shadow-[0_6px_20px_-8px_var(--accent)] hover:brightness-110">
-                <Plus size={16} /> <span className="hidden xl:inline">New</span> <ChevronDown size={14} />
+                <Plus size={16} /> {!compact && <span className="hidden xl:inline">New</span>} <ChevronDown size={14} />
               </button>
             )}
             items={[
@@ -885,7 +1003,7 @@ export function UniverseCanvas({ onNewSystem, onNewGalaxy }: { onNewSystem: (gal
         </div>
       </div>
 
-      {view && galaxies.length > 0 && <Minimap galaxies={galaxies} view={view} size={size} onFly={flyTo} onPan={(v) => { locked.current = null; animateTo(v); }} />}
+      {view && galaxies.length > 0 && <Minimap galaxies={galaxies} view={view} size={size} W={mini.w} H={mini.h} onFly={flyTo} onPan={(v) => { locked.current = null; animateTo(v); }} />}
 
       <div data-ui className="absolute right-3 bottom-3 flex items-center gap-1 rounded-xl border border-line bg-surface/80 p-1 shadow-panel backdrop-blur-xl md:right-4 md:bottom-4">
         <IconButton label="Zoom out (−)" size="sm" onClick={() => zoomAt(1 / 1.4, undefined, undefined, true)}>
@@ -908,20 +1026,20 @@ export function UniverseCanvas({ onNewSystem, onNewGalaxy }: { onNewSystem: (gal
 
 /* ================= pieces ================= */
 
-function Breadcrumbs({ ctx, galaxies, onFly, onUp }: { ctx: { galaxy: GalaxyPlace | null; system: SystemPlace | null }; galaxies: GalaxyPlace[]; onFly: (t: Target) => void; onUp: () => void }) {
-  const crumb = 'inline-flex h-8 max-w-[200px] items-center gap-1.5 rounded-lg px-2.5 text-[13px] font-medium transition-colors hover:bg-surface-3';
+function Breadcrumbs({ ctx, galaxies, onFly, onUp, compact = false }: { ctx: { galaxy: GalaxyPlace | null; system: SystemPlace | null }; galaxies: GalaxyPlace[]; onFly: (t: Target) => void; onUp: () => void; compact?: boolean }) {
+  const crumb = cx('inline-flex h-8 min-w-0 items-center gap-1.5 rounded-lg px-2.5 text-[13px] font-medium transition-colors hover:bg-surface-3', compact ? 'max-w-[150px]' : 'max-w-[200px]');
   const galaxyItems = galaxies.map((g) => ({
     label: `${g.name}${g.virtual ? '' : ` · ${g.systems.length}`}`,
     icon: <span className="h-2.5 w-2.5 rounded-full" style={{ background: g.hex }} />,
     onSelect: () => onFly({ kind: 'galaxy', id: g.id }),
   }));
   return (
-    <nav aria-label="Where you are in the universe" className="pointer-events-auto flex min-w-0 items-center gap-0.5 rounded-xl border border-line bg-surface/80 p-1 shadow-panel backdrop-blur-xl">
+    <nav aria-label="Where you are in the universe" className="pointer-events-auto flex min-w-0 shrink items-center gap-0.5 overflow-hidden rounded-xl border border-line bg-surface/80 p-1 shadow-panel backdrop-blur-xl">
       <IconButton label="Up a level (Esc)" size="sm" onClick={onUp} disabled={!ctx.galaxy}>
         <CornerLeftUp size={16} />
       </IconButton>
-      <button className={cx(crumb, !ctx.galaxy ? 'text-text' : 'text-muted')} onClick={() => onFly({ kind: 'universe' })} aria-current={!ctx.galaxy ? 'location' : undefined}>
-        <Sparkles size={14} className="text-accent-ink" /> Universe
+      <button className={cx(crumb, 'shrink-0', !ctx.galaxy ? 'text-text' : 'text-muted')} onClick={() => onFly({ kind: 'universe' })} aria-current={!ctx.galaxy ? 'location' : undefined} title="Universe">
+        <Sparkles size={14} className="shrink-0 text-accent-ink" /> {!compact || !ctx.galaxy ? 'Universe' : <span className="sr-only">Universe</span>}
       </button>
       {ctx.galaxy ? (
         <>
@@ -1052,6 +1170,8 @@ function StarNode({
   k,
   selected,
   current,
+  close = false,
+  faded = false,
   dimmed,
   dragging,
   onPointerDown,
@@ -1063,6 +1183,10 @@ function StarNode({
   k: number;
   selected: boolean;
   current: boolean;
+  /** Planets are drawn round it: counts go under its name, not on the star (where planets pass). */
+  close?: boolean;
+  /** Under the toolbar (a neighbour of the system in view): drawn faint. */
+  faded?: boolean;
   dimmed: boolean;
   dragging: boolean;
   onPointerDown: (e: React.PointerEvent) => void;
@@ -1078,7 +1202,8 @@ function StarNode({
   const label = `${project.name}. ${stats.open} open, ${stats.parked} parked, ${stats.done} done, ${pct}% complete.${stats.overdue ? ` ${stats.overdue} overdue.` : ''} ${current ? 'Open details.' : 'Fly to this system.'}`;
   const box = ring * 2 + 8;
   return (
-    <div className="absolute" style={{ left: x, top: y, width: 0, height: 0, opacity: dimmed ? 0.3 : 1, zIndex: dragging ? 30 : selected ? 22 : 18 }}>
+    <>
+    <div className={cx('absolute', faded && 'pointer-events-none')} style={{ left: x, top: y, width: 0, height: 0, opacity: dimmed ? 0.3 : faded ? 0.35 : 1, zIndex: dragging ? 30 : selected ? 22 : 18 }}>
       {/* corona */}
       <span
         className="pointer-events-none absolute rounded-full"
@@ -1124,29 +1249,36 @@ function StarNode({
         >
           {rs >= 20 && <ProjectGlyph icon={project.icon} size={Math.round(rs * 0.62)} className="opacity-80" />}
         </span>
-        {rs >= 15 && stats.overdue > 0 && (
+        {rs >= 15 && !close && stats.overdue > 0 && (
           <span className="absolute flex h-5 min-w-5 items-center justify-center rounded-full bg-danger px-1 text-[10.5px] font-bold text-white ring-2 ring-[#0a0c12]" style={{ right: 0, top: 0 }} title={`${stats.overdue} overdue`}>
             {stats.overdue}
           </span>
         )}
-        {rs >= 15 && stats.parked > 0 && (
+        {rs >= 15 && !close && stats.parked > 0 && (
           <span className="absolute flex h-5 items-center gap-0.5 rounded-full bg-[#F5B544] px-1.5 text-[10.5px] font-bold text-[#2a1a00] ring-2 ring-[#0a0c12]" style={{ left: 0, top: 0 }} title={`${stats.parked} parked`}>
             <Pause size={9} strokeWidth={3} />
             {stats.parked}
           </span>
         )}
       </button>
-      <div className="pointer-events-none absolute w-[220px] -translate-x-1/2 text-center" style={{ left: 0, top: ring + 8 }}>
-        <div className={cx('truncate font-display font-semibold [text-shadow:0_0_3px_#000,0_1px_10px_rgba(0,0,0,.95)]', rs >= 30 ? 'text-[15px]' : 'text-[13px]', current ? 'text-white' : 'text-text')}>{project.name}</div>
-        {showMeta && (
-          <div className="tabular truncate text-[11.5px] text-muted [text-shadow:0_0_3px_#000,0_1px_8px_rgba(0,0,0,.95)]">
-            {project.host?.code ? `${project.host.code} · ` : ''}
-            {stats.total === 0 ? 'No tasks yet' : `${stats.open} open${stats.parked ? ` · ${stats.parked} parked` : ''} · ${pct}%`}
-            {stats.openEffortMin > 0 && ` · ${fmtMinutes(stats.openEffortMin)} left`}
-          </div>
-        )}
-      </div>
     </div>
+    {/* its name: above the planets (nothing is drawn over it), two lines at most, ending in an ellipsis at a word */}
+    <div
+      className={cx('pointer-events-none absolute -translate-x-1/2 text-center', close && 'rounded-lg bg-[#05070f]/70 px-2 py-0.5 backdrop-blur-[2px]')}
+      style={{ left: x, top: y + ring + 8, width: close ? 'max-content' : STAR_NAME_W, maxWidth: STAR_NAME_W, opacity: dimmed ? 0.3 : faded ? 0.35 : 1, zIndex: dragging ? 30 : 24 }}
+    >
+      <div className={cx('line-clamp-2 font-display leading-tight font-semibold break-words [text-shadow:0_0_3px_#000,0_1px_10px_rgba(0,0,0,.95)]', rs >= 30 ? 'text-[15px]' : 'text-[13px]', current ? 'text-white' : 'text-text')}>{project.name}</div>
+      {showMeta && (
+        <div className="tabular truncate text-[11.5px] text-muted [text-shadow:0_0_3px_#000,0_1px_8px_rgba(0,0,0,.95)]">
+          {project.host?.code ? `${project.host.code} · ` : ''}
+          {stats.total === 0 ? 'No tasks yet' : `${stats.open} open${stats.parked && !close ? ` · ${stats.parked} parked` : ''} · ${pct}%`}
+          {stats.openEffortMin > 0 && ` · ${fmtMinutes(stats.openEffortMin)} left`}
+          {close && stats.parked > 0 && <span className="text-amber"> · {stats.parked} parked</span>}
+          {close && stats.overdue > 0 && <span className="text-danger"> · {stats.overdue} overdue</span>}
+        </div>
+      )}
+    </div>
+    </>
   );
 }
 
@@ -1160,8 +1292,7 @@ function PlanetNode({
   d,
   lightAngle,
   today,
-  showLabel,
-  labelAbove,
+  label,
   selected,
   dimmed,
   onClick,
@@ -1173,8 +1304,8 @@ function PlanetNode({
   d: number;
   lightAngle: number;
   today: string;
-  showLabel: boolean;
-  labelAbove: boolean;
+  /** Where its name goes; hidden ones show on hover. */
+  label?: OrbitLabel;
   selected: boolean;
   dimmed: boolean;
   onClick: () => void;
@@ -1205,7 +1336,8 @@ function PlanetNode({
   const atmosphere = overdue ? '#f2766b' : soon ? '#f5b544' : null;
   const style: CSSProperties = { left: x, top: y, width: 0, height: 0, opacity: dimmed ? 0.22 : done ? 0.6 : 1, zIndex: selected ? 26 : 20 };
   return (
-    <div className="anim-pop absolute" style={style}>
+    <div className="group/planet anim-pop absolute" style={style}>
+      {selected && <SelectedMark r={r + 9} />}
       <button onClick={onClick} onPointerDown={(e) => e.stopPropagation()} aria-label={desc} title={desc} className="group absolute rounded-full outline-none" style={{ left: -r - 2, top: -r - 2, width: 2 * r + 4, height: 2 * r + 4 }}>
         {overdue && <span className="anim-pulse absolute rounded-full" style={{ inset: 3, boxShadow: '0 0 0 2px #f2766b, 0 0 14px 2px rgba(242,118,107,.55)' }} />}
         <svg className="absolute inset-0 -rotate-90 overflow-visible" width={2 * r + 4} height={2 * r + 4} aria-hidden>
@@ -1220,7 +1352,7 @@ function PlanetNode({
             width: d,
             height: d,
             background: `radial-gradient(circle at ${hx}% ${hy}%, rgba(255,255,255,.75) 0%, ${body} 34%, color-mix(in srgb, ${body} 45%, black) 100%)`,
-            boxShadow: [atmosphere && !overdue ? `0 0 0 2px ${atmosphere}, 0 0 12px 2px ${atmosphere}88` : '', active ? '0 0 0 3px #2dd4bf, 0 0 22px 4px rgba(45,212,191,.65)' : '', selected ? '0 0 0 3px #0a0c12, 0 0 0 5px #8b7cf6' : '']
+            boxShadow: [atmosphere && !overdue ? `0 0 0 2px ${atmosphere}, 0 0 12px 2px ${atmosphere}88` : '', active ? '0 0 0 3px #2dd4bf, 0 0 22px 4px rgba(45,212,191,.65)' : '', selected ? '0 0 0 3px #0a0c12, 0 0 0 6px #a99bff, 0 0 26px 8px rgba(139,124,246,.7)' : '']
               .filter(Boolean)
               .join(', ') || undefined,
           }}
@@ -1238,15 +1370,38 @@ function PlanetNode({
           ) : null}
         </span>
       </button>
-      {(showLabel || selected) && (
+      {label && (
         <div
-          className={cx('pointer-events-none absolute flex w-[170px] -translate-x-1/2 justify-center text-center text-[11.5px] leading-tight', labelAbove && 'items-end', done ? 'text-faint line-through' : 'text-text')}
-          style={labelAbove ? { left: 0, bottom: r + 5 } : { left: 0, top: r + 5 }}
+          className={cx(
+            'pointer-events-none absolute text-[11.5px] leading-[14px] whitespace-nowrap',
+            label.side === 'right' ? 'text-left' : label.side === 'left' ? 'text-right' : 'text-center',
+            done ? 'text-faint line-through' : 'text-text',
+            // hidden names show on hover, on a backing so they read over whatever is there
+            !label.shown && 'hidden rounded-md bg-[#0b0e1a]/90 px-1.5 py-0.5 shadow-panel group-hover/planet:block',
+            selected && 'font-semibold text-white',
+          )}
+          style={{ left: label.rect.x - x - (label.shown ? 0 : 6), top: label.rect.y - y - (label.shown ? 0 : 2), width: label.rect.w + (label.shown ? 0 : 12), zIndex: 2 }}
         >
-          <span className="line-clamp-2 [text-shadow:0_1px_8px_rgba(0,0,0,.95)]">{task.title}</span>
+          {label.lines.map((l, i) => (
+            <span key={i} className="block [text-shadow:0_0_3px_#000,0_1px_8px_rgba(0,0,0,.95)]">
+              {l}
+            </span>
+          ))}
         </div>
       )}
     </div>
+  );
+}
+
+/** The selected planet: four brackets around it, so it is unmistakable at any zoom. */
+function SelectedMark({ r }: { r: number }) {
+  const s = r * 2;
+  const a = Math.max(6, r * 0.45);
+  const p = (x: number, y: number, dx: number, dy: number) => `M ${x + dx * a} ${y} L ${x} ${y} L ${x} ${y + dy * a}`;
+  return (
+    <svg className="pointer-events-none absolute overflow-visible" style={{ left: -r, top: -r }} width={s} height={s} aria-hidden>
+      <path d={[p(0, 0, 1, 1), p(s, 0, -1, 1), p(0, s, 1, -1), p(s, s, -1, -1)].join(' ')} fill="none" stroke="#c4b9ff" strokeWidth={2.2} strokeLinecap="round" />
+    </svg>
   );
 }
 
@@ -1296,7 +1451,7 @@ function QuickAddSlot({ projectId, color, x, y, active, onOpen, onClose }: { pro
   );
 }
 
-function FiltersButton({ hosted = false, hasFinished = false }: { hosted?: boolean; hasFinished?: boolean }) {
+function FiltersButton({ hosted = false, hasFinished = false, compact = false }: { hosted?: boolean; hasFinished?: boolean; compact?: boolean }) {
   const filter = useOrbit((s) => s.filter);
   const setFilter = useOrbit((s) => s.setFilter);
   const attachments = useOrbit((s) => s.host?.attachments);
@@ -1339,7 +1494,7 @@ function FiltersButton({ hosted = false, hasFinished = false }: { hosted?: boole
         title="Filters"
         className={cx('inline-flex h-10 items-center gap-1.5 rounded-xl border px-3 text-sm font-medium shadow-panel backdrop-blur-xl', count ? 'border-accent bg-accent-soft text-accent-ink' : 'border-line bg-surface/80 text-muted hover:text-text')}
       >
-        <SlidersHorizontal size={15} /> <span className="hidden xl:inline">Filters</span>
+        <SlidersHorizontal size={15} /> {!compact && <span className="hidden xl:inline">Filters</span>}
         {count > 0 && <span className="rounded-full bg-accent px-1.5 text-[11px] text-white">{count}</span>}
       </button>
       {open && (
@@ -1379,9 +1534,13 @@ function FiltersButton({ hosted = false, hasFinished = false }: { hosted?: boole
   );
 }
 
-function Minimap({ galaxies, view, size, onFly, onPan }: { galaxies: GalaxyPlace[]; view: View; size: Size; onFly: (t: Target) => void; onPan: (v: View) => void }) {
-  const W = 176;
-  const H = 112;
+/** The minimap grows with a wide canvas. */
+function minimapSize(w: number) {
+  const W = w >= 1700 ? 248 : w >= 1400 ? 212 : 176;
+  return { w: W, h: Math.round(W * 0.64) };
+}
+
+function Minimap({ galaxies, view, size, W, H, onFly, onPan }: { galaxies: GalaxyPlace[]; view: View; size: Size; W: number; H: number; onFly: (t: Target) => void; onPan: (v: View) => void }) {
   let minX = Infinity,
     minY = Infinity,
     maxX = -Infinity,
@@ -1474,25 +1633,30 @@ function Legend({ onClose, hosted = false }: { onClose: () => void; hosted?: boo
 }
 
 /** The three switches for what a host adds to the sky; kept in preferences. */
-function LayerSwitches() {
+function LayerSwitches({ compact = false }: { compact?: boolean }) {
   const layers = useOrbit((s) => s.prefs.layers);
   const setPrefs = useOrbit((s) => s.setPrefs);
-  const items: [keyof typeof layers, string, string][] = [
-    ['moons', 'Moons', 'What each task uses or holds'],
-    ['belts', 'Belts', 'What a system holds that no task uses'],
-    ['beacons', 'Dates', 'Dates that matter, on galaxies and beside systems'],
+  const items: [keyof typeof layers, string, string, React.ReactNode][] = [
+    ['moons', 'Moons', 'What each task uses or holds', <Moon key="m" size={15} />],
+    ['belts', 'Belts', 'What a system holds that no task uses', <CircleDashed key="b" size={15} />],
+    ['beacons', 'Dates', 'Dates that matter, on galaxies and beside systems', <Diamond key="d" size={14} />],
   ];
   return (
     <div role="group" aria-label="Layers" className="flex h-10 items-center gap-0.5 rounded-xl border border-line bg-surface/80 px-1 shadow-panel backdrop-blur-xl">
-      {items.map(([key, label, title]) => (
+      {items.map(([key, label, title, icon]) => (
         <button
           key={key}
-          title={title}
+          title={compact ? `${label}: ${title}` : title}
+          aria-label={label}
           aria-pressed={layers[key]}
           onClick={() => setPrefs({ layers: { ...layers, [key]: !layers[key] } })}
-          className={cx('h-8 rounded-lg px-2.5 text-xs font-medium transition-colors', layers[key] ? 'bg-accent-soft text-text' : 'text-faint line-through decoration-faint/60 hover:text-text')}
+          className={cx(
+            'flex h-8 items-center justify-center rounded-lg text-xs font-medium transition-colors',
+            compact ? 'w-8' : 'px-2.5',
+            layers[key] ? 'bg-accent-soft text-text' : cx('text-faint hover:text-text', !compact && 'line-through decoration-faint/60'),
+          )}
         >
-          {label}
+          {compact ? icon : label}
         </button>
       ))}
     </div>
@@ -1500,11 +1664,51 @@ function LayerSwitches() {
 }
 
 /** The selected planet's moons, named beside it. Each opens its page in the host. */
-function MoonChips({ set, families, x, top, off, left, maxW, hostName }: { set: MoonSet; families: Record<string, Family>; x: number; top: number; off: number; left: boolean; maxW: number; hostName: string }) {
+function MoonChips({
+  set,
+  families,
+  x,
+  top,
+  off,
+  left,
+  maxW,
+  hostName,
+  lead,
+  leadFrom = 0,
+}: {
+  set: MoonSet;
+  families: Record<string, Family>;
+  x: number;
+  top: number;
+  off: number;
+  left: boolean;
+  maxW: number;
+  hostName: string;
+  /** A faint line from the planet to the list, when the list sits away from it. */
+  lead?: { from: { x: number; y: number }; to: { x: number; y: number } };
+  /** The line starts this far from the planet's centre (its edge). */
+  leadFrom?: number;
+}) {
   const openInHost = useOrbit((s) => s.openInHost);
   const shown = set.items.slice(0, 8);
   const rest = set.items.length - shown.length + set.more;
   return (
+    <>
+    {lead && (
+      <svg className="pointer-events-none absolute inset-0 z-[39] h-full w-full overflow-visible" aria-hidden>
+        {(() => {
+          const a = Math.atan2(lead.to.y - lead.from.y, lead.to.x - lead.from.x);
+          const x1 = lead.from.x + Math.cos(a) * leadFrom;
+          const y1 = lead.from.y + Math.sin(a) * leadFrom;
+          return (
+            <>
+              <line x1={x1} y1={y1} x2={lead.to.x} y2={lead.to.y} stroke="#c4b9ff" strokeOpacity={0.6} strokeWidth={1.2} strokeDasharray="3 4" />
+              <circle cx={x1} cy={y1} r={2.5} fill="#c4b9ff" fillOpacity={0.85} />
+            </>
+          );
+        })()}
+      </svg>
+    )}
     <div
       data-ui
       role="list"
@@ -1532,7 +1736,12 @@ function MoonChips({ set, families, x, top, off, left, maxW, hostName }: { set: 
           </button>
         );
       })}
-      {rest > 0 && <span className="rounded-full bg-[#0e111e]/90 px-2.5 py-0.5 text-[11px] text-muted">+{rest} more in {hostName}</span>}
+      {rest > 0 && (
+        <span className="rounded-xl bg-[#0e111e]/90 px-2.5 py-0.5 text-[11px] text-muted" style={{ maxWidth: maxW }}>
+          +{rest} more in {hostName}
+        </span>
+      )}
     </div>
+    </>
   );
 }
