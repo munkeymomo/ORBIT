@@ -535,7 +535,36 @@ describe('working state is kept by the host (caps.work)', () => {
 
 /* ---------------- locked, refresh, links ---------------- */
 
-describe('refresh and linked items', () => {
+describe('locked, refresh, linked items', () => {
+  it('refresh re-reads the handshake: locked comes and goes; while locked host changes are refused but working state works', async () => {
+    const h = await editable();
+    expect(h.s().abilities().locked).toBeUndefined();
+    h.host.setLocked('Stocktaking until noon.');
+    await h.s().refreshHost();
+    expect(h.host.calls.handshake).toBeGreaterThanOrEqual(2);
+    expect(h.s().abilities().locked).toBe('Stocktaking until noon.');
+    h.s().updateTask('t-compost', { title: 'x' });
+    h.s().completeTask('t-compost');
+    expect(h.toasts()).toContain('Stocktaking until noon.');
+    h.s().parkTask('t-compost', {});
+    h.s().planTask('t-compost', TODAY, 'later');
+    await h.settle();
+    expect(h.host.log).toEqual([]);
+    expect(h.task('t-compost')).toMatchObject({ title: 'Turn the compost', status: 'parked' });
+    expect(h.s().dayItems).toHaveLength(1);
+    h.host.setLocked();
+    await h.s().refreshHost();
+    expect(h.s().abilities().locked).toBeUndefined();
+  });
+
+  it('a handshake that fails on refresh is shown as an error, and the sky stays', async () => {
+    const h = await editable();
+    h.host.handshake = () => Promise.reject(new Error('host restarting'));
+    await h.s().refreshHost();
+    expect(h.s().host!.error).toMatch(/host restarting/);
+    expect(h.s().tasks.length).toBeGreaterThan(50);
+  });
+
   it('detach takes a linked item off (and refreshes); refused, it comes back', async () => {
     const h = await editable();
     h.s().detachLinked('t-raised-bed', 'a-saw');

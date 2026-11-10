@@ -32,7 +32,7 @@ import { nextUnusedColor } from '../lib/colors';
 import { buildExample } from '../data/example';
 import { findFreeSpot, nextGalaxySpot, spiralLayout, SYSTEM_SPACING, type Pt } from '../data/layout';
 import type { Handshake, Open, OrbitHost, Planet } from '../host/types';
-import { isUnchanged } from '../host/types';
+import { HOST_PROTOCOL, isUnchanged } from '../host/types';
 import { adaptVerse, DEEP_SPACE, placementKey, planetToTask, type HostExtras } from '../host/adapt';
 import { abilities, may, mayWork, needsReason, refusal, STANDALONE, type HostAbilities } from '../host/caps';
 import { createRecordWriter, type HostedWriting, type WriteOptions } from '../host/writer';
@@ -159,7 +159,7 @@ export interface OrbitState extends Snapshot {
   init: (adapter: StorageAdapter, storageError?: string | null, opts?: InitOptions) => Promise<void>;
 
   // host
-  /** Ask the host for the verse again; nothing changes on screen when the host answers "unchanged". */
+  /** Ask the host for its handshake and the verse again; nothing changes on screen when it answers "unchanged". */
   refreshHost: () => Promise<void>;
   /** Resolves when no change is waiting for the host (tests, and before a refresh). */
   hostSettled: () => Promise<void>;
@@ -693,6 +693,15 @@ export function createOrbitStore(deps: StoreDeps = {}): StoreApi<OrbitState> {
         if (!hostApi || !get().host) return;
         // changes still waiting for the host are answered first, so the verse that comes back includes them
         await writer.idle();
+        try {
+          // the handshake can change while ORBIT runs (e.g. the host locks its records): read it again
+          const info = await hostApi.handshake();
+          if (!info || info.protocol !== HOST_PROTOCOL || !Array.isArray(info.verses) || !info.verses.length) throw new Error('its handshake is no longer usable');
+          set({ host: { ...get().host!, info } });
+        } catch (e) {
+          set({ host: { ...get().host!, error: `Could not refresh from ${can().name}: ${e instanceof Error ? e.message : String(e)}` } });
+          return;
+        }
         const h = get().host!;
         try {
           const v = await hostApi.verse(h.verseId, h.rev || undefined);
