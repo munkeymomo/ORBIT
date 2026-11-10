@@ -198,17 +198,27 @@ export interface Size {
   /** Space taken by the toolbar at the top (measured). */
   top?: number;
 }
-export const PADS = { top: 76, bottom: 64, side: 40 };
+export const PADS = { top: 76, bottom: 72, side: 40 };
+/** Room kept beside a system for planet names that hang outside its outer orbit (screen px, each side). */
+export const NAME_ROOM = 80;
+/** Room under the galaxies of the whole universe for their names, chips and counts (screen px). */
+export const UNIVERSE_LABEL_ROOM = 96;
+/** Room above for a cluster's name on its outline (screen px). */
+export const CLUSTER_ROOM = 22;
 
 const topPad = (size: Size) => size.top ?? PADS.top;
 
-export function fitCircle(cx: number, cy: number, r: number, size: Size, maxK = MAX_K): View {
+export function fitCircle(cx: number, cy: number, r: number, size: Size, maxK = MAX_K, side = PADS.side): View {
   const top = topPad(size);
-  const k = clamp(Math.min((size.w - PADS.side * 2) / (2 * r), (size.h - top - PADS.bottom) / (2 * r)), MIN_K, maxK);
+  const k = clamp(Math.min((size.w - side * 2) / (2 * r), (size.h - top - PADS.bottom) / (2 * r)), MIN_K, maxK);
   const midY = top + (size.h - top - PADS.bottom) / 2;
   return { k, x: size.w / 2 - cx * k, y: midY - cy * k };
 }
 
+/**
+ * The whole universe: every galaxy, with room in screen pixels for the names under them and for a cluster's
+ * name above (so the fit is the same at any window size, and a wide window is filled as far as its height allows).
+ */
 export function fitUniverse(galaxies: GalaxyPlace[], size: Size): View {
   if (!galaxies.length) return { x: size.w / 2, y: size.h / 2, k: 0.4 };
   let minX = Infinity,
@@ -219,20 +229,55 @@ export function fitUniverse(galaxies: GalaxyPlace[], size: Size): View {
     minX = Math.min(minX, g.x - g.r);
     maxX = Math.max(maxX, g.x + g.r);
     minY = Math.min(minY, g.y - g.r);
-    maxY = Math.max(maxY, g.y + g.r + 260);
+    maxY = Math.max(maxY, g.y + g.r);
   }
-  const top = topPad(size);
-  const k = clamp(Math.min((size.w - PADS.side * 2) / (maxX - minX), (size.h - top - PADS.bottom) / (maxY - minY)), MIN_K, 0.6);
-  const midY = top + (size.h - top - PADS.bottom) / 2;
-  return { k, x: size.w / 2 - ((minX + maxX) / 2) * k, y: midY - ((minY + maxY) / 2) * k };
+  const top = topPad(size) + CLUSTER_ROOM;
+  const availW = size.w - PADS.side * 2;
+  const availH = size.h - top - PADS.bottom - UNIVERSE_LABEL_ROOM;
+  const k = clamp(Math.min(availW / Math.max(1, maxX - minX), Math.max(40, availH) / Math.max(1, maxY - minY)), MIN_K, 0.6);
+  const contentH = (maxY - minY) * k + UNIVERSE_LABEL_ROOM;
+  const y0 = top + Math.max(0, (size.h - top - PADS.bottom - contentH) / 2);
+  return { k, x: size.w / 2 - ((minX + maxX) / 2) * k, y: y0 - minY * k };
 }
 
 export function fitGalaxy(g: GalaxyPlace, size: Size): View {
   return fitCircle(g.x, g.y, g.r + 60, size, 0.9);
 }
 
-export function fitSystem(s: SystemPlace, size: Size): View {
-  return fitCircle(s.x, s.y + 12, s.extent + 24, size, 1.6);
+/**
+ * A system: its outer orbit, belt and dates, with room beside it for planet names; then the labels of its
+ * dates (which hang to the right of their diamonds, at a fixed size) are kept in view, by moving the system
+ * left when there is room on that side, or else by zooming out a little.
+ */
+export function fitSystem(s: SystemPlace, size: Size, measure: (t: string) => number = (t) => t.length * 6.3): View {
+  // planet names need room beside the outer orbit; a very narrow canvas gives the system all it has
+  const side = size.w >= 700 ? PADS.side + NAME_ROOM : PADS.side;
+  let v = fitCircle(s.x, s.y + 12, s.extent + 24, size, 1.6, side);
+  if (!s.beacons.length) return v;
+  const right = size.w - PADS.side;
+  for (let i = 0; i < 4; i++) {
+    let need = -Infinity;
+    s.beacons.forEach((b, j) => {
+      const a = -1.1 + j * 0.34;
+      const bx = (s.x + Math.cos(a) * s.beaconR) * v.k + v.x;
+      need = Math.max(need, bx + 10 + measure(`${[b.code, b.title].filter(Boolean).join(' ')} · in 00 d${b.serves ? ` · serves ${b.serves}` : ''}`) + 6);
+    });
+    const over = need - right;
+    if (over <= 0) break;
+    const leftEdge = (s.x - s.extent - 24) * v.k + v.x;
+    const room = leftEdge - PADS.side;
+    if (room >= over) {
+      v = { ...v, x: v.x - over };
+      break;
+    }
+    if (room > 0) v = { ...v, x: v.x - room };
+    // zoom out about the system's centre so the labels come in
+    const k2 = Math.max(MIN_K, v.k * Math.max(0.8, (right - ((s.x * v.k + v.x))) / Math.max(1, need - (s.x * v.k + v.x))));
+    const cx = s.x * v.k + v.x;
+    const cy = (s.y + 12) * v.k + v.y;
+    v = { k: k2, x: cx - s.x * k2, y: cy - (s.y + 12) * k2 };
+  }
+  return v;
 }
 
 /**
