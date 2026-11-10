@@ -568,3 +568,18 @@ describe('adopt, then the working state is not saved', () => {
 });
 
 void (null as unknown as Handshake | OrbitHost | Planet);
+
+describe('the sky does not jump on refresh', () => {
+  it('after one galaxy is dragged, the others (and deep space) keep their places', async () => {
+    const h = await hosted();
+    const before = new Map(h.s().groups.map((g) => [g.id, { x: g.x, y: g.y }]));
+    const deep = { ...h.s().prefs.deepSpace };
+    h.s().updateGroup('g-workshop', { x: 50_000, y: 50_000 });
+    await settle();
+    h.host.change((v) => (v.planets.find((p) => p.id === 't-brackets')!.title = 'Buy brackets and screws'));
+    await h.s().refreshHost();
+    for (const g of h.s().groups) if (g.id !== 'g-workshop') expect({ id: g.id, x: g.x, y: g.y }).toEqual({ id: g.id, ...before.get(g.id)! });
+    expect(h.s().groups.find((g) => g.id === 'g-workshop')).toMatchObject({ x: 50_000, y: 50_000 });
+    expect(h.s().prefs.deepSpace).toEqual(deep);
+  });
+});

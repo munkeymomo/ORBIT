@@ -231,6 +231,8 @@ export interface AdaptOptions {
    * place in every verse, so switching verse keeps it where it was.
    */
   centres?: Map<string, Pt>;
+  /** Where deep space already sits on screen (it keeps that place when it has no placement of its own). */
+  deepAt?: Pt;
 }
 
 export function adaptVerse(v: Verse, placements: Placement[], opts: AdaptOptions = {}): AdaptedVerse {
@@ -252,7 +254,7 @@ export function adaptVerse(v: Verse, placements: Placement[], opts: AdaptOptions
       taken.push(round(p));
     }
   }
-  const deepPlaced = deepUsed ? placed.get(placementKey.galaxy(DEEP_SPACE)) : undefined;
+  const deepPlaced = deepUsed ? (placed.get(placementKey.galaxy(DEEP_SPACE)) ?? opts.deepAt) : undefined;
   if (deepPlaced) taken.push(round(deepPlaced));
   for (const g of galaxies) {
     const known = opts.centres?.get(g.id);

@@ -634,7 +634,12 @@ export function createOrbitStore(deps: StoreDeps = {}): StoreApi<OrbitState> {
       const ownGroups = own(get().groups);
       const ownGroupIds = new Set(ownGroups.map((g) => g.id));
       const ownDeep = own(get().projects).filter((p) => !p.groupId || !ownGroupIds.has(p.groupId));
-      const ad = adaptVerse(v, get().placements, { taken: ownGroups.map((g) => ({ x: g.x, y: g.y })), deepUsed: ownDeep.length > 0, deepTaken: ownDeep.map((p) => ({ x: p.x, y: p.y })) });
+      // a host galaxy with no placement keeps the place it has on screen (another one dragged elsewhere frees a
+      // spiral slot, but does not make the rest jump on the next refresh)
+      const onScreenCentres = new Map(get().groups.filter((g) => g.host).map((g) => [g.id, { x: g.x, y: g.y }]));
+      const allGroupIds = new Set(get().groups.map((g) => g.id));
+      const hadDeep = onScreenCentres.size > 0 && get().projects.some((p) => !p.groupId || !allGroupIds.has(p.groupId));
+      const ad = adaptVerse(v, get().placements, { taken: ownGroups.map((g) => ({ x: g.x, y: g.y })), deepUsed: ownDeep.length > 0, deepTaken: ownDeep.map((p) => ({ x: p.x, y: p.y })), centres: onScreenCentres, deepAt: hadDeep ? get().prefs.deepSpace : undefined });
       const groups = [...own(get().groups), ...ad.groups];
       const projects = [...own(get().projects), ...ad.projects];
       // ORBIT's working state goes onto the host's tasks; a task with a change still waiting for the host stays
