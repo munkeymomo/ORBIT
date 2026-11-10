@@ -228,7 +228,7 @@ test('editable demo host: edit a title, complete with Undo, a refusal undone, de
   const panel = await openTask(page, /^Garden galaxy/, /^Vegetable beds\./, /^Turn the compost/);
   const title = panel.getByLabel('Task title');
   await expect(title).not.toHaveAttribute('readonly', '');
-  await expect(panel.getByText(/stay on this computer, with ORBIT/)).toBeVisible();
+  await expect(panel.getByText(/are kept with ORBIT by Demo host, not in your Demo host records/)).toBeVisible();
 
   // a title edit goes to the host as a patch of just that field
   await title.fill('Turn the compost heap');

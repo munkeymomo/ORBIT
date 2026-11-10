@@ -185,7 +185,7 @@ export function TaskPanel({ id }: { id: string }) {
             <Links task={task} />
           </>
         )}
-        {task.host && work && <p className="-mt-3 text-xs text-faint">Estimate, energy, progress, subtasks, dependencies and links stay on this computer, with ORBIT; {can.name} does not see them.</p>}
+        {task.host && work && <p className="-mt-3 text-xs text-faint">Estimate, energy, progress, subtasks, dependencies and links are kept with ORBIT by {can.name}, not in your {can.name} records.</p>}
 
         {editable ? (
           <section>

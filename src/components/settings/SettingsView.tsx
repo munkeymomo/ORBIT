@@ -179,7 +179,7 @@ function HostDataSection() {
   const t = useOrbit((s) => s.tasks.length);
   const nPlacements = useOrbit((s) => s.placements.length);
   return (
-    <Section icon={<HardDrive size={18} />} title="Your data" desc={<>Records are kept by {can.name}. Positions and preferences are kept by {can.name} on this computer.</>}>
+    <Section icon={<HardDrive size={18} />} title="Your data" desc={<>Records are kept by {can.name}. Positions and preferences are kept with ORBIT by {can.name}.</>}>
       <p className="tabular text-sm text-muted">
         {plural(p, 'system')} · {plural(t, 'task')} shown from {can.name} · {plural(nPlacements, 'position')} you set
       </p>
