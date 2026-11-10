@@ -497,3 +497,13 @@ describe('hosted loads are normalised', () => {
     expect(saved.groups.every((g) => typeof g.x === 'number')).toBe(true);
   });
 });
+
+describe('yours versus the host\'s', () => {
+  it('only a hosted, non-host, non-deep-space galaxy is "yours"', async () => {
+    const { isYours } = await import('../../src/host/caps');
+    expect(isYours(true, {})).toBe(true);
+    expect(isYours(true, { host: { id: 'g-1' } })).toBe(false);
+    expect(isYours(true, { virtual: true })).toBe(false);
+    expect(isYours(false, {})).toBe(false); // standalone: no cue at all
+  });
+});

@@ -100,3 +100,8 @@ export const refusal = {
   target: (a: HostAbilities) => `${a.name} does not take tasks in that system.`,
   reason: (a: HostAbilities, what: 'delete' | 'drop') => `${a.name} asks for a reason to ${what} this task.`,
 };
+
+/** Hosted only: is this galaxy one of ORBIT's own (not the host's, not deep space)? Standalone: never, so no cue. */
+export function isYours(hosted: boolean, g: { host?: unknown; virtual?: boolean }): boolean {
+  return hosted && !g.host && !g.virtual;
+}

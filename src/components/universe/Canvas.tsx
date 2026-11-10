@@ -1,3 +1,4 @@
+import { isYours } from '../../host/caps';
 import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import { ArrowUpRight, ChevronDown, ChevronRight, CircleDashed, CircleHelp, Diamond, Lock, Maximize, Minus, Moon, Orbit, Pause, Plus, Search, SlidersHorizontal, Sparkles, Check, CornerLeftUp, X, ExternalLink } from 'lucide-react';
 import { orbit, useOrbit } from '../../store/store';
@@ -724,13 +725,14 @@ export function UniverseCanvas({ onNewSystem, onNewGalaxy }: { onNewSystem: (gal
             galaxies.map((g) => {
               const [cx, cy] = [g.x * view.k + view.x, g.y * view.k + view.y];
               const counts = galaxyCountText(g) + (g.overdue ? ` · ${g.overdue} overdue` : '');
-              const chipW = g.host?.chip ? measureLabel(g.host.chip) + 40 : 0;
-              return { id: g.id, cx, cy, sr: g.r * view.k, w: Math.max(150, measureGalaxyName(g.name) + 34, measureLabel(counts) + 34, chipW), chip: !!g.host?.chip };
+              const own = isYours(can.hosted, g);
+              const chipW = g.host?.chip ? measureLabel(g.host.chip) + 40 : own ? 80 : 0;
+              return { id: g.id, cx, cy, sr: g.r * view.k, w: Math.max(150, measureGalaxyName(g.name) + 34, measureLabel(counts) + 34, chipW), chip: !!g.host?.chip || own };
             }),
             { w: size.w, h: size.h, top: size.top ?? 76 },
           )
         : null,
-    [galaxies, view, size, level],
+    [galaxies, view, size, level, can.hosted],
   );
 
   return (
@@ -768,6 +770,7 @@ export function UniverseCanvas({ onNewSystem, onNewGalaxy }: { onNewSystem: (gal
             arrows={curves}
             arrowFocus={arrowFocus}
             galaxyBoxes={galaxyLabels ?? undefined}
+            hosted={can.hosted}
           />
         )}
 
@@ -788,6 +791,7 @@ export function UniverseCanvas({ onNewSystem, onNewGalaxy }: { onNewSystem: (gal
                 y={universe ? (spot?.y ?? cy + Math.min(sr * 0.92, sr * 0.5 + 70)) : cy - sr - 6}
                 compact={!universe}
                 brief={universe && !!spot?.brief}
+                yours={isYours(can.hosted, g)}
                 dimmed={dim && !g.matches}
                 inside={ctx.galaxy?.id === g.id}
                 dragging={drag?.kind === 'galaxy' && drag.id === g.id}
@@ -1107,7 +1111,7 @@ export function UniverseCanvas({ onNewSystem, onNewGalaxy }: { onNewSystem: (gal
             <IconButton label="What the shapes mean" variant="secondary" active={legend} onClick={() => setLegend((l) => !l)} className="bg-surface/80 backdrop-blur-xl">
               <CircleHelp size={18} />
             </IconButton>
-            {legend && <Legend onClose={() => setLegend(false)} hosted={can.hosted} verseLegend={verses.size > 1 ? verses.get(host?.shown ?? '')?.legend : undefined} />}
+            {legend && <Legend onClose={() => setLegend(false)} hosted={can.hosted} hostName={can.name} verseLegend={verses.size > 1 ? verses.get(host?.shown ?? '')?.legend : undefined} />}
           </div>
           {!can.personal && !sky && (
             <IconButton label="Tidy galaxies into a spiral" variant="secondary" onClick={() => useOrbit.getActions().arrangeGalaxiesSpiral()} disabled={galaxies.length < 2} className="bg-surface/80 backdrop-blur-xl">
@@ -1240,6 +1244,7 @@ function GalaxyLabel({
   y,
   compact,
   brief = false,
+  yours = false,
   dimmed,
   inside,
   dragging,
@@ -1254,6 +1259,8 @@ function GalaxyLabel({
   compact: boolean;
   /** Universe level, crowded: the name (and chip) only; the counts show on hover. */
   brief?: boolean;
+  /** Hosted: one of ORBIT's own galaxies (the host's carry their own chip). */
+  yours?: boolean;
   dimmed: boolean;
   inside: boolean;
   dragging: boolean;
@@ -1283,6 +1290,11 @@ function GalaxyLabel({
       {g.host?.chip && (
         <span className={cx('mx-auto mt-1 flex w-max max-w-[260px] items-center gap-1.5 truncate rounded-full border px-2 py-0.5 font-medium whitespace-nowrap', compact ? 'text-[10px]' : 'text-[11px]')} style={{ borderColor: `${g.hex}88`, color: '#dfe6ff', background: 'rgba(10,12,22,.72)' }}>
           <span className="h-1.5 w-1.5 shrink-0 rounded-full" style={{ background: g.hex }} /> {g.host.chip}
+        </span>
+      )}
+      {yours && (
+        <span className={cx('mx-auto mt-1 flex w-max items-center gap-1.5 rounded-full border px-2 py-0.5 font-medium whitespace-nowrap', compact ? 'text-[10px]' : 'text-[11px]')} style={{ borderColor: `${g.hex}66`, color: '#c9d1e8', background: 'rgba(10,12,22,.6)' }}>
+          Yours
         </span>
       )}
       {!compact && !brief && (
@@ -1932,7 +1944,7 @@ function Minimap({ galaxies, view, size, W, H, onFly, onPan }: { galaxies: Galax
   );
 }
 
-function Legend({ onClose, hosted = false, verseLegend }: { onClose: () => void; hosted?: boolean; verseLegend?: string }) {
+function Legend({ onClose, hosted = false, hostName = '', verseLegend }: { onClose: () => void; hosted?: boolean; hostName?: string; verseLegend?: string }) {
   const Row = ({ icon, children }: { icon: React.ReactNode; children: React.ReactNode }) => (
     <li className="flex items-center gap-3">
       <span className="flex w-8 shrink-0 justify-center">{icon}</span>
@@ -1962,7 +1974,8 @@ function Legend({ onClose, hosted = false, verseLegend }: { onClose: () => void;
         <Row icon={<Lock size={15} className="text-text" />}>Waiting on another task; dashed arrows show what blocks what.</Row>
         {hosted && (
           <>
-            <Row icon={<span className="h-5 w-5 rounded-full border border-dashed border-white/60" />}>Ringed with ticks: a galaxy kept by the host. Its chip says what it is.</Row>
+            <Row icon={<span className="h-5 w-5 rounded-full border border-dashed border-white/60" />}>Dashed ring with ticks: a galaxy kept by {hostName}. Its chip says what it is.</Row>
+            <Row icon={<span className="h-5 w-5 rounded-full border border-white/60" />}>Thin solid rim, “Yours” chip: a galaxy of your own, kept with ORBIT.</Row>
             <Row icon={<span className="flex gap-0.5"><span className="h-2 w-2 rounded-full bg-[#f5b544]" /><span className="h-2 w-2 rounded-full border border-[#4fa3f0]" /></span>}>Moons: what a task uses. Hollow: archived; struck: gone; red: changed since.</Row>
             <Row icon={<span className="h-3 w-5 rounded-full border-y-2 border-dotted border-white/50" />}>Belt: what a system holds that no task uses. Many: a haze with a count.</Row>
             <Row icon={<span className="h-2.5 w-2.5 rotate-45 border-[1.6px] border-white" />}>Diamond: a date. White planned, amber soon, red late, teal achieved, grey rescoped.</Row>

@@ -1,3 +1,4 @@
+import { isYours } from '../../host/caps';
 import { useLayoutEffect, useRef } from 'react';
 import { clamp, daysBetween } from '../../lib/util';
 import { colorHex } from '../../lib/colors';
@@ -48,7 +49,10 @@ export function SpacePainter({
   arrows = [],
   arrowFocus,
   galaxyBoxes,
+  hosted = false,
 }: {
+  /** Hosted: ORBIT's own galaxies get a thin solid rim (the host's have the dashed survey ring). */
+  hosted?: boolean;
   /** Where each galaxy's words are at universe level (a cluster's outline goes round them). */
   galaxyBoxes?: Map<string, { x: number; y: number; w: number; h: number }>;
   /** A verse's relations between planets ("made from"), as curves on screen. Never dependencies. */
@@ -214,6 +218,7 @@ export function SpacePainter({
       }
 
       if (gx.host && !gx.virtual) drawSurveyRing(g, cx, cy, sr, gx.hex, Math.max(fade, 0.45) * dimF);
+      else if (isYours(hosted, gx)) drawOwnRim(g, cx, cy, sr, gx.hex, Math.max(fade, 0.45) * dimF);
 
       if (layers.beacons && gx.beacons.length) {
         const labels = universeLevel ? (sr >= 150 ? 'code' : 'none') : 'full';
@@ -478,6 +483,18 @@ function text(g: CanvasRenderingContext2D, t: string, x: number, y: number, o: {
   g.shadowBlur = 6;
   g.fillStyle = o.color;
   g.fillText(t, x, y);
+  g.restore();
+}
+
+/** One of ORBIT's own galaxies beside a host's: a thin solid rim, quiet, readable at any zoom. */
+function drawOwnRim(g: CanvasRenderingContext2D, cx: number, cy: number, sr: number, hex: string, alpha: number) {
+  g.save();
+  g.setLineDash([]);
+  g.strokeStyle = rgba(hex, 0.55 * alpha);
+  g.lineWidth = 1.4;
+  g.beginPath();
+  g.arc(cx, cy, sr * 1.04, 0, Math.PI * 2);
+  g.stroke();
   g.restore();
 }
 

@@ -96,6 +96,7 @@ export function TaskPanel({ id }: { id: string }) {
 
         {task.host?.note && <p className="rounded-xl border border-line bg-surface-2 px-3 py-2 text-sm text-muted">{task.host.note}</p>}
         {task.host && <KeptBy refOf={task.host} />}
+        {!task.host && can.hosted && <p className="rounded-xl border border-line bg-surface-2 px-3 py-2 text-sm text-muted">Yours — kept with ORBIT by {can.name}</p>}
         <PrimaryActions task={task} active={isActive} />
         {task.status === 'parked' && <ParkedSummary taskId={id} />}
 
