@@ -14,6 +14,7 @@ export function UniverseCards({ onNewProject }: { onNewProject: () => void }) {
   const filter = useOrbit((s) => s.filter);
   const setFilter = useOrbit((s) => s.setFilter);
   const expanded = useOrbit((s) => s.expanded);
+  const canCreate = useOrbit((s) => !s.host);
   const dim = filterActive(filter);
   const visible = dim ? model.filter((pv) => pv.matches) : model;
 
@@ -42,9 +43,11 @@ export function UniverseCards({ onNewProject }: { onNewProject: () => void }) {
               </button>
             )}
           </div>
-          <Button variant="primary" size="lg" className="!h-11 !px-3.5" onClick={onNewProject} aria-label="New project">
-            <Plus size={20} />
-          </Button>
+          {canCreate && (
+            <Button variant="primary" size="lg" className="!h-11 !px-3.5" onClick={onNewProject} aria-label="New project">
+              <Plus size={20} />
+            </Button>
+          )}
         </div>
         <div className="-mx-4 flex gap-2 overflow-x-auto px-4 pb-0.5 [scrollbar-width:none]">
           {chips.map(([k, label]) => (
@@ -124,7 +127,7 @@ function ProjectCard({ pv, open }: { pv: ProjectView; open: boolean }) {
               <TaskRow key={tv.task.id} tv={tv} onOpen={() => select({ type: 'task', id: tv.task.id })} />
             ))}
           </ul>
-          <form
+          {pv.canAdd && <form
             className="flex items-center gap-2 border-t border-line px-4 py-2.5"
             onSubmit={(e) => {
               e.preventDefault();
@@ -140,7 +143,7 @@ function ProjectCard({ pv, open }: { pv: ProjectView; open: boolean }) {
                 Add
               </Button>
             )}
-          </form>
+          </form>}
           <button onClick={() => select({ type: 'project', id: project.id })} className="w-full border-t border-line py-3 text-[13px] font-medium text-muted">
             Project details
           </button>

@@ -28,6 +28,9 @@ import { fmtClock, fmtMinutes, fmtTimeOfDay, normaliseUrl, relativeTime, toDateK
 import { Button, Field, IconButton, Input, Menu, SectionTitle, Segmented, Select, Textarea, cx } from '../ui/primitives';
 import { DueBadge, ENERGY_META, PRIORITY_META, PriorityBars, ProjectChip } from '../ui/visuals';
 import { PlanTodayButton, StartFocusButton, useDraft } from './actions';
+import { KeptBy, LinkedItems } from './HostPanels';
+import { useAbilities } from '../../host/useAbilities';
+import { may, mayWork } from '../../host/caps';
 
 export function TaskPanel({ id }: { id: string }) {
   const task = useOrbit((s) => s.tasks.find((t) => t.id === id))!;
@@ -37,6 +40,9 @@ export function TaskPanel({ id }: { id: string }) {
   const isActive = useOrbit((s) => s.focus?.taskId === id);
   const today = toDateKey(Date.now());
   const up = (patch: Partial<Task>) => updateTask(id, patch);
+  const can = useAbilities();
+  // A host's task is edited only where the host allows it (never, in the read-only stage).
+  const editable = may(can, task.host, 'edit');
 
   const title = useDraft(task.title, (v) => v.trim() && up({ title: v.trim() }), 500);
   const notes = useDraft(task.notes, (v) => up({ notes: v }));
@@ -52,7 +58,7 @@ export function TaskPanel({ id }: { id: string }) {
         </button>
         <div className="flex-1" />
         <StatusPill task={task} active={isActive} />
-        <TaskMenu task={task} />
+        {(may(can, task.host, 'delete') || (!task.host && can.personal)) && <TaskMenu task={task} />}
         <IconButton label="Close (Esc)" size="sm" onClick={() => select(null)}>
           <X size={18} />
         </IconButton>
@@ -66,6 +72,7 @@ export function TaskPanel({ id }: { id: string }) {
             onBlur={title.flush}
             onKeyDown={(e) => e.key === 'Enter' && (e.preventDefault(), (e.target as HTMLTextAreaElement).blur())}
             rows={1}
+            readOnly={!editable}
             aria-label="Task title"
             className={cx('field-sizing-content w-full resize-none bg-transparent font-display text-[22px] leading-snug font-semibold tracking-tight outline-none', done && 'text-muted line-through')}
           />
@@ -78,10 +85,24 @@ export function TaskPanel({ id }: { id: string }) {
           </div>
         </div>
 
+        {task.host?.note && <p className="rounded-xl border border-line bg-surface-2 px-3 py-2 text-sm text-muted">{task.host.note}</p>}
+        {task.host && <KeptBy refOf={task.host} />}
         <PrimaryActions task={task} active={isActive} />
         {task.status === 'parked' && <ParkedSummary taskId={id} />}
 
-        <section className="grid grid-cols-2 gap-x-4 gap-y-4">
+        {task.host && <LinkedItems taskId={id} />}
+        {task.host?.facts?.length ? (
+          <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1.5 text-sm">
+            {task.host.facts.map((f) => (
+              <div key={f.label} className="contents">
+                <dt className="text-muted">{f.label}</dt>
+                <dd>{f.value}</dd>
+              </div>
+            ))}
+          </dl>
+        ) : null}
+
+        {editable && <section className="grid grid-cols-2 gap-x-4 gap-y-4">
           <Field group label="Priority" className="col-span-2">
             <Segmented<Priority>
               label="Priority"
@@ -131,16 +152,30 @@ export function TaskPanel({ id }: { id: string }) {
           <Field label="Project" className="col-span-2">
             <ProjectSelect value={task.projectId} onChange={(projectId) => up({ projectId })} />
           </Field>
-        </section>
+        </section>}
 
-        <Subtasks task={task} />
-        <Dependencies task={task} />
-        <Links task={task} />
+        {/* subtasks, dependencies and links are ORBIT's own working state: not for a host's tasks yet */}
+        {!task.host && (
+          <>
+            <Subtasks task={task} />
+            <Dependencies task={task} />
+            <Links task={task} />
+          </>
+        )}
 
-        <section>
-          <SectionTitle>Notes</SectionTitle>
-          <Textarea value={notes.value} onChange={(e) => notes.onChange(e.target.value)} onBlur={notes.flush} placeholder="Anything worth remembering about this task" rows={4} />
-        </section>
+        {editable ? (
+          <section>
+            <SectionTitle>Notes</SectionTitle>
+            <Textarea value={notes.value} onChange={(e) => notes.onChange(e.target.value)} onBlur={notes.flush} placeholder="Anything worth remembering about this task" rows={4} />
+          </section>
+        ) : (
+          task.notes && (
+            <section>
+              <SectionTitle>Notes</SectionTitle>
+              <p className="text-sm whitespace-pre-wrap text-text">{task.notes}</p>
+            </section>
+          )
+        )}
 
         <Checkpoints taskId={id} />
         <SessionHistory task={task} color={hex} />
@@ -152,6 +187,7 @@ export function TaskPanel({ id }: { id: string }) {
 function StatusPill({ task, active }: { task: Task; active: boolean }) {
   if (active) return <span className="rounded-full bg-teal-soft px-2.5 py-1 text-xs font-semibold text-teal">In focus</span>;
   if (task.status === 'parked') return <span className="rounded-full bg-amber-soft px-2.5 py-1 text-xs font-semibold text-amber">Parked</span>;
+  if (task.host?.dropped) return <span className="rounded-full bg-surface-3 px-2.5 py-1 text-xs font-semibold text-muted">Dropped</span>;
   if (task.status === 'done') return <span className="rounded-full bg-surface-3 px-2.5 py-1 text-xs font-semibold text-muted">Done</span>;
   return null;
 }
@@ -208,9 +244,13 @@ function PrimaryActions({ task, active }: { task: Task; active: boolean }) {
   const reopenTask = useOrbit((s) => s.reopenTask);
   const setView = useOrbit((s) => s.setView);
   const now = useNow(active ? 1000 : null);
+  const can = useAbilities();
+  const status = may(can, task.host, 'status');
+  const work = mayWork(can, task.host);
+  if (!status && !work) return null;
 
   if (task.status === 'done')
-    return (
+    return !status ? null : (
       <div className="flex flex-wrap gap-2">
         <Button variant="secondary" icon={<RotateCcw size={15} />} onClick={() => reopenTask(task.id)}>
           Reopen
@@ -253,14 +293,16 @@ function PrimaryActions({ task, active }: { task: Task; active: boolean }) {
         <StartFocusButton taskId={task.id} />
       )}
       <PlanTodayButton taskId={task.id} />
-      {task.status !== 'parked' && (
+      {task.status !== 'parked' && work && (
         <Button variant="secondary" icon={<SquareParking size={15} />} onClick={() => openPark({ taskId: task.id })} title="Save where you are without focusing">
           Park
         </Button>
       )}
-      <Button variant="secondary" icon={<CircleCheck size={15} />} onClick={() => completeTask(task.id)}>
-        Complete
-      </Button>
+      {status && (
+        <Button variant="secondary" icon={<CircleCheck size={15} />} onClick={() => completeTask(task.id)}>
+          Complete
+        </Button>
+      )}
     </div>
   );
 }

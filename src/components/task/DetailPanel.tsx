@@ -4,6 +4,7 @@ import { cx } from '../ui/primitives';
 import { TaskPanel } from './TaskPanel';
 import { ProjectPanel } from './ProjectPanel';
 import { GalaxyPanel } from './GalaxyPanel';
+import { BeaconPanel, HostGalaxyPanel, HostSystemPanel } from './HostPanels';
 
 /**
  * Right-hand detail panel. Wide screens: pushes content. Tablets: overlays.
@@ -12,7 +13,19 @@ import { GalaxyPanel } from './GalaxyPanel';
 export function DetailPanel() {
   const selection = useOrbit((s) => s.selection);
   const exists = useOrbit((s) =>
-    !selection ? false : selection.type === 'task' ? s.tasks.some((t) => t.id === selection.id) : selection.type === 'project' ? s.projects.some((p) => p.id === selection.id) : s.groups.some((g) => g.id === selection.id),
+    !selection
+      ? false
+      : selection.type === 'task'
+        ? s.tasks.some((t) => t.id === selection.id)
+        : selection.type === 'project'
+          ? s.projects.some((p) => p.id === selection.id)
+          : selection.type === 'group'
+            ? s.groups.some((g) => g.id === selection.id)
+            : !!s.host?.beacons.some((b) => b.id === selection.id),
+  );
+  // records a host owns get read-only panels of their own
+  const hostOwned = useOrbit((s) =>
+    !selection ? false : selection.type === 'project' ? !!s.projects.find((p) => p.id === selection.id)?.host : selection.type === 'group' ? !!s.groups.find((g) => g.id === selection.id)?.host : false,
   );
   const select = useOrbit((s) => s.select);
   const phone = useIsPhone();
@@ -20,8 +33,16 @@ export function DetailPanel() {
   if (!selection || !exists) return null;
 
   const body =
-    selection.type === 'task' ? <TaskPanel key={selection.id} id={selection.id} /> : selection.type === 'project' ? <ProjectPanel key={selection.id} id={selection.id} /> : <GalaxyPanel key={selection.id} id={selection.id} />;
-  const label = selection.type === 'task' ? 'Task details' : selection.type === 'project' ? 'Project details' : 'Galaxy details';
+    selection.type === 'task' ? (
+      <TaskPanel key={selection.id} id={selection.id} />
+    ) : selection.type === 'project' ? (
+      hostOwned ? <HostSystemPanel key={selection.id} id={selection.id} /> : <ProjectPanel key={selection.id} id={selection.id} />
+    ) : selection.type === 'group' ? (
+      hostOwned ? <HostGalaxyPanel key={selection.id} id={selection.id} /> : <GalaxyPanel key={selection.id} id={selection.id} />
+    ) : (
+      <BeaconPanel key={selection.id} id={selection.id} />
+    );
+  const label = selection.type === 'task' ? 'Task details' : selection.type === 'project' ? (hostOwned ? 'System details' : 'Project details') : selection.type === 'group' ? 'Galaxy details' : 'Date details';
 
   if (phone)
     return (

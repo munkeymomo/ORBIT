@@ -1,4 +1,6 @@
-import type { Group } from '../../types';
+import type { Group, HostRef } from '../../types';
+import type { Beacon, Collection } from '../../host/types';
+import type { MoonSet } from '../../host/adapt';
 import { colorHex } from '../../lib/colors';
 import { clamp } from '../../lib/util';
 import { orbitLayout, type ProjectView } from './model';
@@ -38,6 +40,23 @@ export interface Slot {
   d: number;
 }
 
+/** When the sky would get too busy to read (host records only; ORBIT's own sky is unchanged). */
+export const CLUTTER = {
+  /** Moons drawn on one planet before the rest are counted as "+n". */
+  moons: 5,
+  /** Open tasks in one system above which they are drawn as a ring of dots with a count. */
+  tasks: 40,
+  /** Belt items above which a belt is drawn as a ring of haze with a count. */
+  belt: 60,
+} as const;
+
+/** What a host adds to the sky (empty when standalone). */
+export interface SpaceExtras {
+  beacons: Beacon[];
+  attachments: Record<string, MoonSet>;
+  collections: Record<string, Collection>;
+}
+
 export interface SystemPlace {
   pv: ProjectView;
   galaxyId: string;
@@ -52,6 +71,15 @@ export interface SystemPlace {
   slots: Slot[];
   /** Radius that contains the whole system including labels. */
   extent: number;
+  /** Too many open tasks to draw one by one: they are a ring of dots with a count. */
+  busy: boolean;
+  /** The system's belt (what it holds that no planet uses), at radius r (world units). */
+  belt: { r: number; collection: Collection; haze: boolean } | null;
+  /** Beacons drawn beside the system. */
+  beacons: Beacon[];
+  /** Radius (world units) of the ring the system's beacons sit on. */
+  beaconR: number;
+  host?: HostRef;
 }
 
 export interface GalaxyPlace {
@@ -71,7 +99,25 @@ export interface GalaxyPlace {
   overdue: number;
   matches: boolean;
   hasActive: boolean;
+  /** Beacons on the galaxy's rim. */
+  beacons: Beacon[];
+  host?: HostRef;
 }
+
+/** Where a galaxy's i-th beacon sits on its rim (world units). */
+export function galaxyBeaconSpot(g: { x: number; y: number; r: number }, i: number) {
+  const a = -0.95 + i * 0.3;
+  const r = g.r * 1.06;
+  return { x: g.x + Math.cos(a) * r, y: g.y + Math.sin(a) * r };
+}
+
+/** Where a system's i-th beacon sits beside it (world units), upper right, clear of planets and belt. */
+export function systemBeaconSpot(s: { x: number; y: number; beaconR: number }, i: number) {
+  const a = -1.1 + i * 0.34;
+  return { x: s.x + Math.cos(a) * s.beaconR, y: s.y + Math.sin(a) * s.beaconR };
+}
+
+const NO_EXTRAS: SpaceExtras = { beacons: [], attachments: {}, collections: {} };
 
 export function systemExtent(rings: number[], radius: number): number {
   return (rings.at(-1) ?? radius + 50) + 48;
@@ -83,7 +129,14 @@ export function buildSpace(
   deepSpace: { x: number; y: number },
   filterOn: boolean,
   drag: { kind: 'system'; id: string; wx: number; wy: number } | { kind: 'galaxy'; id: string; x: number; y: number } | null,
+  extras: SpaceExtras = NO_EXTRAS,
 ): GalaxyPlace[] {
+  const beaconsOfSystem = new Map<string, Beacon[]>();
+  const beaconsOfGalaxy = new Map<string, Beacon[]>();
+  for (const b of extras.beacons) {
+    if (b.system) beaconsOfSystem.set(b.system, [...(beaconsOfSystem.get(b.system) ?? []), b]);
+    else if (b.galaxy) beaconsOfGalaxy.set(b.galaxy, [...(beaconsOfGalaxy.get(b.galaxy) ?? []), b]);
+  }
   const groupIds = new Set(groups.map((g) => g.id));
   const centre = (id: string, x: number, y: number) => (drag?.kind === 'galaxy' && drag.id === id ? { x: drag.x, y: drag.y } : { x, y });
   const make = (id: string, name: string, color: string, at: { x: number; y: number }, group: Group | null): GalaxyPlace => {
@@ -92,8 +145,19 @@ export function buildSpace(
     const dragged = (pv: ProjectView) => drag?.kind === 'system' && drag.id === pv.project.id;
     const systems: SystemPlace[] = members.map((pv) => {
       const rel = drag?.kind === 'system' && dragged(pv) ? { x: drag.wx - c.x, y: drag.wy - c.y } : { x: pv.project.x, y: pv.project.y };
-      const { rings, slots } = orbitLayout(pv, true);
-      return { pv, galaxyId: id, x: c.x + rel.x, y: c.y + rel.y, rx: rel.x, ry: rel.y, rings, slots, extent: systemExtent(rings, pv.radius) };
+      const host = pv.project.host;
+      const busy = !!host && pv.stats.open > CLUTTER.tasks;
+      const laid = busy ? { rings: [pv.radius + 86], slots: [] } : orbitLayout(pv, pv.canAdd);
+      const { rings, slots } = laid;
+      const outer = rings.at(-1) ?? pv.radius + 50;
+      const coll = extras.collections[pv.project.id];
+      const belt = coll ? { r: outer + 74, collection: coll, haze: coll.total > CLUTTER.belt || !coll.items?.length } : null;
+      const beacons = beaconsOfSystem.get(pv.project.id) ?? [];
+      const beaconR = (belt ? belt.r : outer) + 46;
+      let extent = systemExtent(rings, pv.radius);
+      if (belt) extent = Math.max(extent, belt.r + 60);
+      if (beacons.length) extent = Math.max(extent, beaconR + 24);
+      return { pv, galaxyId: id, x: c.x + rel.x, y: c.y + rel.y, rx: rel.x, ry: rel.y, rings, slots, extent, busy, belt, beacons, beaconR, host };
     });
     // A star being dragged does not stretch its galaxy.
     const r = Math.max(700, ...systems.filter((s) => !dragged(s.pv)).map((s) => Math.hypot(s.rx, s.ry) + s.extent + 120));
@@ -105,7 +169,8 @@ export function buildSpace(
       x: c.x,
       y: c.y,
       r,
-      virtual: !group,
+      // deep space, or a holder the host made up for loose systems
+      virtual: !group || !!group.host?.virtual,
       group,
       systems,
       open: sum((s) => s.pv.stats.open),
@@ -115,6 +180,8 @@ export function buildSpace(
       overdue: sum((s) => s.pv.stats.overdue),
       matches: !filterOn || systems.some((s) => s.pv.matches),
       hasActive: systems.some((s) => s.pv.hasActive),
+      beacons: group ? (beaconsOfGalaxy.get(group.id) ?? []) : [],
+      host: group?.host,
     };
   };
   const out = groups.map((g) => make(g.id, g.name, g.color, { x: g.x, y: g.y }, g));
