@@ -1605,7 +1605,9 @@ function ItemNode({
     .filter(Boolean)
     .join(' · ');
   return (
-    <div className="group/planet anim-pop absolute" data-item={it.id} style={{ left: x, top: y, width: 0, height: 0, opacity: dimmed ? 0.22 : it.ghost ? 0.62 : 1, zIndex: selected ? 26 : 20 }} onPointerEnter={() => onHover?.(true)} onPointerLeave={() => onHover?.(false)}>
+    // The pop animation ends at opacity 1 and holds it, so the faintness lives on an inner element.
+    <div className="group/planet anim-pop absolute" data-item={it.id} style={{ left: x, top: y, width: 0, height: 0, zIndex: selected ? 26 : 20 }} onPointerEnter={() => onHover?.(true)} onPointerLeave={() => onHover?.(false)}>
+     <div className="absolute top-0 left-0" data-fade style={{ width: 0, height: 0, opacity: dimmed ? 0.22 : it.ghost ? 0.62 : 1 }}>
       {selected && <SelectedMark r={r + 9} />}
       <button onClick={onClick} onPointerDown={(e) => e.stopPropagation()} aria-label={`${desc}. Open details.`} title={desc} className="group absolute rounded-full outline-none" style={{ left: -r - 2, top: -r - 2, width: 2 * r + 4, height: 2 * r + 4 }}>
         {it.ring != null && (
@@ -1652,6 +1654,7 @@ function ItemNode({
           ))}
         </div>
       )}
+     </div>
     </div>
   );
 }
@@ -1710,9 +1713,11 @@ function PlanetNode({
     .filter(Boolean)
     .join(' · ');
   const atmosphere = overdue ? '#f2766b' : soon ? '#f5b544' : null;
-  const style: CSSProperties = { left: x, top: y, width: 0, height: 0, opacity: dimmed ? 0.22 : done ? 0.6 : 1, zIndex: selected ? 26 : 20 };
+  const style: CSSProperties = { left: x, top: y, width: 0, height: 0, zIndex: selected ? 26 : 20 };
   return (
+    // opacity on an inner element: the pop animation holds opacity 1 and would override it here
     <div className="group/planet anim-pop absolute" style={style} onPointerEnter={() => onHover?.(true)} onPointerLeave={() => onHover?.(false)}>
+     <div className="absolute top-0 left-0" data-fade style={{ width: 0, height: 0, opacity: dimmed ? 0.22 : done ? 0.6 : 1 }}>
       {selected && <SelectedMark r={r + 9} />}
       <button onClick={onClick} onPointerDown={(e) => e.stopPropagation()} aria-label={desc} title={desc} className="group absolute rounded-full outline-none" style={{ left: -r - 2, top: -r - 2, width: 2 * r + 4, height: 2 * r + 4 }}>
         {overdue && <span className="anim-pulse absolute rounded-full" style={{ inset: 3, boxShadow: '0 0 0 2px #f2766b, 0 0 14px 2px rgba(242,118,107,.55)' }} />}
@@ -1765,6 +1770,7 @@ function PlanetNode({
           ))}
         </div>
       )}
+     </div>
     </div>
   );
 }

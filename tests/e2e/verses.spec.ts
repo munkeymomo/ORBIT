@@ -133,3 +133,20 @@ test('standalone ORBIT has no verse switcher', async ({ page }) => {
   await expect(page.getByRole('group', { name: 'Views of the same records' })).toHaveCount(0);
   await expect(page.locator('[data-verse]')).toHaveCount(0);
 });
+
+test('a ghost is faint, and an item that does not match a highlight dims (the pop animation must not hold opacity at 1)', async ({ page }, info) => {
+  test.skip(info.project.name === 'phone', 'desktop canvas');
+  await openDemo(page);
+  await verseButton(page, 'things').click();
+  await intoGalaxy(page, 'Garden');
+  await page.getByRole('button', { name: /^Garden tools\./ }).click();
+  const fade = (id: string) => page.locator(`[data-item="${id}"] [data-fade]`);
+  await expect(fade('i-drill@garden')).toBeAttached();
+  // computed, not the inline value: this is what the user sees
+  const opacity = (id: string) => fade(id).evaluate((e) => Number(getComputedStyle(e).opacity));
+  expect(await opacity('i-drill@garden')).toBeCloseTo(0.62, 2);
+  expect(await opacity('i-trays')).toBe(1);
+  await page.getByLabel('Highlight matching systems and tasks').fill('canes');
+  await expect.poll(() => opacity('i-trays')).toBeCloseTo(0.22, 2);
+  expect(await opacity('i-canes')).toBe(1);
+});
