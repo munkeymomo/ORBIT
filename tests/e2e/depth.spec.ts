@@ -88,7 +88,11 @@ test('a galaxy inside a galaxy is reached by its portal, and the path leads back
   await expect(galaxy(page, 'Saturday market stall')).toHaveCount(0);
   await galaxy(page, 'Bakery').click();
   await expect(crumbs(page).getByRole('button', { name: 'Bakery' })).toBeVisible();
+  // its panel, left open, does not follow into the galaxy inside it
+  await galaxy(page, 'Bakery').click();
+  await expect(page.getByRole('complementary', { name: 'Galaxy details' })).toBeVisible();
   await page.getByRole('button', { name: 'Go in', exact: true }).click();
+  await expect(page.getByRole('complementary', { name: 'Galaxy details' })).toHaveCount(0);
   await expect(crumbs(page).getByRole('button', { name: 'Saturday market stall' })).toBeVisible();
   // the path: the two groups, then the bakery it is inside, then the stall itself
   await expect(crumbs(page).locator('[data-depth-step]')).toHaveCount(3);

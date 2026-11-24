@@ -401,6 +401,9 @@ export function UniverseCanvas({ onNewSystem, onNewGalaxy }: { onNewSystem: (gal
     stopAnim();
     locked.current = viewFor(t) ? t : { kind: 'universe' };
     setView(v);
+    // a galaxy's panel left open does not follow into a sky that galaxy is not in
+    const sel = orbit().selection;
+    if (sel?.type === 'group' && !galaxiesRef.current.some((g) => g.id === sel.id)) select(null);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [galaxies, scope, size.w]);
 
