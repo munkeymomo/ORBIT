@@ -196,6 +196,38 @@ export function SpacePainter({
       }
       g.globalAlpha = 1;
 
+      // a group that is gone into: the galaxies inside it, small, in their own colours
+      const minis = gx.host?.closed?.colors;
+      if (minis?.length) {
+        const mr = sr * (minis.length === 1 ? 0.5 : 0.3);
+        for (let m = 0; m < minis.length; m++) {
+          // one in the middle when there are several, the rest around it
+          const ring = minis.length === 1 || m === 0 ? 0 : sr * 0.58;
+          const ang = ((m - 1) / Math.max(1, minis.length - 1)) * Math.PI * 2 - Math.PI / 2;
+          const mx = cx + Math.cos(ang) * ring;
+          const my = cy + Math.sin(ang) * ring;
+          const mini = spiralParticles(`${gx.id}:inside:${m}`, 0);
+          const glow = g.createRadialGradient(mx, my, 0, mx, my, mr);
+          glow.addColorStop(0, rgba('#ffffff', 0.5 * fade * dimF));
+          glow.addColorStop(0.3, rgba(minis[m], 0.3 * fade * dimF));
+          glow.addColorStop(1, rgba(minis[m], 0));
+          g.fillStyle = glow;
+          g.beginPath();
+          g.arc(mx, my, mr, 0, Math.PI * 2);
+          g.fill();
+          g.fillStyle = minis[m];
+          for (let i = 0; i < mini.n; i += 3) {
+            const px = mx + mini.x[i] * mr;
+            const py = my + mini.y[i] * mr;
+            if (px < -4 || py < -4 || px > w + 4 || py > h + 4) continue;
+            const sz = Math.max(1, mini.size[i] * sizeScale * 0.7);
+            g.globalAlpha = mini.alpha[i] * fade * dimF;
+            g.fillRect(px - sz / 2, py - sz / 2, sz, sz);
+          }
+        }
+        g.globalAlpha = 1;
+      }
+
       if (!gx.virtual) {
         // bright core
         const cr = sr * 0.2;

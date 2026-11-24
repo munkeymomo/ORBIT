@@ -57,13 +57,17 @@ export interface HostRef {
   /** A task ORBIT has asked the host to create, not yet answered (its id is ORBIT's temporary one). */
   pending?: boolean;
   cluster?: string;
+  /** A galaxy inside another galaxy (that galaxy's id): out of the sky until that one is gone into. */
+  parent?: string;
+  /** A group of galaxies shown as one body until it is gone into (made by the Universe, not a record). */
+  closed?: { galaxies: number; groups: number; colors?: string[] };
   /** How many things a system stands for, when its planets are only some of them. */
   count?: number;
   facts?: Fact[];
   open?: Open;
   also?: Also[];
-  /** A system that leads to another verse (drawn as a portal). */
-  portal?: { verse: string; label?: string };
+  /** A system that leads to another verse, or to a galaxy there (drawn as a portal). */
+  portal?: { verse: string; label?: string; galaxy?: string };
   /** What the host offers to do with this galaxy or system (in its panel). */
   actions?: HostAction[];
 }

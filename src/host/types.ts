@@ -117,6 +117,8 @@ export interface Galaxy {
   /** Hidden unless finished galaxies are shown. */
   finished?: boolean;
   cluster?: string;
+  /** This galaxy is inside that one: out of the sky until that galaxy is gone into (through a portal there, or the path). */
+  parent?: string;
   /** Not a record of the host's: a holder for loose systems. */
   virtual?: boolean;
   facts?: Fact[];
@@ -127,11 +129,19 @@ export interface Galaxy {
   actions?: HostAction[];
 }
 
-/** A faint label around galaxies that belong together. */
+/**
+ * Galaxies that belong together. By default a faint outline with its name around them. With `enter`, a group that
+ * is gone into: its galaxies (and the groups inside it, `parent`) are out of the sky until then, and it shows as
+ * one body.
+ */
 export interface Cluster {
   id: string;
   name: string;
   open?: Open;
+  /** The cluster this one is inside. */
+  parent?: string;
+  /** A group that is gone into, not an outline. */
+  enter?: boolean;
 }
 
 export interface System {
@@ -145,8 +155,8 @@ export interface System {
   color?: string;
   /** A holder the host made up (e.g. for tasks filed nowhere). */
   virtual?: boolean;
-  /** This system leads to another verse. */
-  portal?: { verse: string; label?: string };
+  /** This system leads to another verse, or (with `galaxy`) to that galaxy there: the way into a galaxy inside this one. */
+  portal?: { verse: string; label?: string; galaxy?: string };
   /** How many things it stands for, when the planets are only some of them. */
   count?: number;
   facts?: Fact[];

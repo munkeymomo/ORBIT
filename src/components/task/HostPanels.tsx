@@ -408,7 +408,7 @@ export function HostSystemPanel({ id }: { id: string }) {
           <button
             data-portal-go={id}
             disabled={!portalVerse}
-            onClick={() => portalVerse && void showVerse(portalVerse.id, project.groupId ? { galaxy: project.groupId } : undefined)}
+            onClick={() => portalVerse && void showVerse(portalVerse.id, ref.portal?.galaxy ? { galaxy: ref.portal.galaxy } : project.groupId ? { galaxy: project.groupId } : undefined)}
             className="flex w-full items-center gap-3 rounded-xl border border-[#b18cff]/60 bg-[#b18cff]/10 px-3 py-2.5 text-left enabled:hover:bg-[#b18cff]/20 disabled:opacity-50"
           >
             <WormholeMark size={20} className="shrink-0 text-[#c9b3ff]" />

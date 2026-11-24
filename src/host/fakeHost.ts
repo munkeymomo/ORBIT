@@ -67,6 +67,9 @@ export interface FakeHostOptions {
   locked?: string;
   /** Editable only: also keep ORBIT's own galaxies, systems and tasks (caps.personal) and offer adopt(). */
   personal?: boolean;
+  /** Show depth (PROTOCOL.md, "Depth"): the clusters are groups that are gone into, one inside the other, and in the
+   *  verses other than the first the market stall is a galaxy inside the bakery, reached by a portal there. */
+  depth?: boolean;
   /** What adopt() does (default 'all'). */
   adopt?: AdoptMode;
   /** `host.at`: where ORBIT goes first. */
@@ -291,6 +294,19 @@ export function editableVerse(v: Verse): Verse {
   return v;
 }
 
+/**
+ * The same verse with depth: "Around the house" is a group, and "Trade and markets" a group inside it. With
+ * `inside`, the market stall is a galaxy inside the bakery instead, with a portal in the bakery that leads to it.
+ */
+function deepen(v: Verse, inside: boolean): Verse {
+  v.clusters = (v.clusters ?? []).map((c) => (c.id === 'c-trade' ? { ...c, enter: true, parent: 'c-home' } : { ...c, enter: true }));
+  if (inside && v.galaxies?.some((g) => g.id === 'g-market') && v.galaxies.some((g) => g.id === 'g-bakery')) {
+    v.galaxies = v.galaxies.map((g) => (g.id === 'g-market' ? { ...g, cluster: undefined, parent: 'g-bakery' } : g));
+    v.systems = [...(v.systems ?? []), { id: `way-in-${v.verse}`, galaxy: 'g-bakery', name: 'Saturday market stall', portal: { verse: v.verse, galaxy: 'g-market', label: 'Go in' } }];
+  }
+  return v;
+}
+
 export function createFakeHost(opts: FakeHostOptions = {}): FakeHost {
   const editable = !!opts.editable;
   const personal = editable && !!opts.personal;
@@ -475,14 +491,14 @@ export function createFakeHost(opts: FakeHostOptions = {}): FakeHost {
           host.calls.unchanged++;
           return { verse: other.verse, rev: other.rev, unchanged: true };
         }
-        return structuredClone(other);
+        return opts.depth ? deepen(structuredClone(other), true) : structuredClone(other);
       }
       if (id !== current.verse) throw new Error(`No verse called “${id}”.`);
       if (since && since === current.rev) {
         host.calls.unchanged++;
         return { verse: current.verse, rev: current.rev, unchanged: true };
       }
-      return structuredClone(current);
+      return opts.depth ? deepen(structuredClone(current), false) : structuredClone(current);
     },
     open(target) {
       host.opened.push({ kind: target.kind, id: target.id });

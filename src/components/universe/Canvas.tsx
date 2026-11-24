@@ -13,7 +13,9 @@ import { useAbilities } from '../../host/useAbilities';
 import type { MoonSet } from '../../host/adapt';
 import { ChangedBadge, ChangedPill, ChangedRim, NotEqual } from './ChangedMark';
 import { changedText } from '../../host/changed';
-import type { Also, Arrow, Beacon, Family } from '../../host/types';
+import type { Also, Arrow, Beacon, Cluster, Family } from '../../host/types';
+import { buildDepth, TOP, type Depth } from '../../host/depth';
+import type { Group } from '../../types';
 import { verseSwitch } from '../../host/verses';
 import { arrowCurves, placeArrowChips, planetSpots, starBoxes, type PlacedChip } from './arrows';
 import { VerseBar } from './VerseBar';
@@ -71,6 +73,11 @@ const NO_CHIPS: PlacedChip[] = [];
 const measureGalaxyName = (name: string) => measureWith('600 15px Space Grotesk Variable, system-ui, sans-serif', 9.6)(name.toUpperCase()) + name.length * 2.1;
 /** The counts under a galaxy's name (TASK counts; items as "n items"). */
 function galaxyCountText(g: GalaxyPlace): string {
+  const closed = g.host?.closed;
+  if (closed) {
+    const galaxies = `${closed.galaxies} ${closed.galaxies === 1 ? 'galaxy' : 'galaxies'}`;
+    return closed.groups ? `${galaxies} · ${closed.groups} group${closed.groups === 1 ? '' : 's'}` : galaxies;
+  }
   if (g.systems.length === 0) return g.host ? 'Empty' : 'Empty — add a system';
   const pct = g.total ? Math.round((g.done / g.total) * 100) : 0;
   const sys = `${g.systems.length} system${g.systems.length === 1 ? '' : 's'}`;
@@ -79,6 +86,27 @@ function galaxyCountText(g: GalaxyPlace): string {
   return [sys, `${g.open} open`, items, `${pct}%`].filter(Boolean).join(' · ');
 }
 type Target = { kind: 'universe' } | { kind: 'galaxy'; id: string } | { kind: 'system'; id: string };
+
+/** A group that is gone into, as the body it shows while closed: no systems, and never a record. */
+function closedBody(c: Cluster & { at?: { x: number; y: number } }, depth: Depth, verse: string, groups: Group[]): Group {
+  // the colours of the first few galaxies inside it: drawn as small galaxies, so it reads as "these, together"
+  const colors = depth
+    .under(c.id)
+    .slice(0, 7)
+    .map((id) => groups.find((g) => g.id === id)?.color)
+    .filter((x): x is string => !!x)
+    .map(colorHex);
+  return {
+    id: c.id,
+    createdAt: 0,
+    updatedAt: 0,
+    name: c.name,
+    color: '#8E95A9',
+    x: c.at?.x ?? 0,
+    y: c.at?.y ?? 0,
+    host: { id: c.id, kind: 'galaxy', verse, caps: {}, virtual: true, chip: 'Group', closed: { ...depth.count(c.id), colors }, open: c.open },
+  };
+}
 type Drag =
   | { kind: 'system'; id: string; wx: number; wy: number; origin: string; target: string | null }
   | { kind: 'galaxy'; id: string; x: number; y: number }
@@ -134,19 +162,41 @@ export function UniverseCanvas({ onNewSystem, onNewGalaxy }: { onNewSystem: (gal
 
   const dim = filterActive(filter);
   const spaceDrag = drag?.kind === 'system' ? { kind: 'system' as const, id: drag.id, wx: drag.wx, wy: drag.wy } : drag;
+  /* Depth (host/depth.ts): the sky holds one scope at a time. A scope belongs to its verse, and must still be there
+     after a refresh; otherwise it is the top. */
+  const verseShown = host?.shown ?? '';
+  const allClusters = sky?.clusters ?? host?.clusters;
+  const depth = useMemo(
+    () => buildDepth(groups.map((g) => ({ id: g.id, name: g.name, cluster: g.host?.cluster, parent: g.host?.parent })), allClusters ?? []),
+    [groups, allClusters],
+  );
+  const [scopeAt, setScopeAt] = useState<{ verse: string; scope: string }>({ verse: verseShown, scope: TOP });
+  const scope = scopeAt.verse === verseShown && depth.has(scopeAt.scope) ? scopeAt.scope : TOP;
+  const scopeRef = useRef(scope);
+  scopeRef.current = scope;
+  const depthRef = useRef(depth);
+  depthRef.current = depth;
   // Galaxies a host marks finished stay out of the sky (with their systems) unless asked for.
-  const shownGroups = useMemo(() => (filter.showFinished ? groups : groups.filter((g) => !g.host?.finished)), [groups, filter.showFinished]);
+  const shownGroups = useMemo(() => {
+    const live = filter.showFinished ? groups : groups.filter((g) => !g.host?.finished);
+    if (!depth.deep) return live;
+    const bodies = depth.groupsIn(scope).map((c) => closedBody(c, depth, verseShown, groups));
+    return [...bodies, ...live.filter((g) => depth.scopeOf(g.id) === scope)];
+  }, [groups, filter.showFinished, depth, scope, verseShown]);
   const shownModel = useMemo(() => {
-    if (shownGroups.length === groups.length) return model;
-    const hidden = new Set(groups.filter((g) => !shownGroups.includes(g)).map((g) => g.id));
-    return model.filter((pv) => !pv.project.groupId || !hidden.has(pv.project.groupId));
-  }, [model, groups, shownGroups]);
+    const shown = new Set(shownGroups.map((g) => g.id));
+    const all = new Set(groups.map((g) => g.id));
+    // deep space is at the top only
+    if (scope === TOP && groups.every((g) => shown.has(g.id))) return model;
+    return model.filter((pv) => (pv.project.groupId && all.has(pv.project.groupId) ? shown.has(pv.project.groupId) : scope === TOP));
+  }, [model, groups, shownGroups, scope]);
   const extras = useMemo(
     () => (sky ? { beacons: sky.beacons, attachments: {}, collections: sky.collections } : host ? { beacons: host.beacons, attachments: host.attachments, collections: host.collections } : undefined),
     [sky, host?.beacons, host?.attachments, host?.collections], // eslint-disable-line react-hooks/exhaustive-deps
   );
   const families = sky?.families ?? host?.families;
-  const clusters = sky?.clusters ?? host?.clusters;
+  // a group that is gone into is a body in the sky, not an outline
+  const clusters = useMemo(() => allClusters?.filter((c) => !c.enter), [allClusters]);
   const arrowList: Arrow[] = sky?.arrows ?? host?.arrows ?? NO_ARROWS;
   /** A system of the verse on screen, by id. */
   const projectOf = (id: string) => (orbit().host?.sky?.projects ?? orbit().projects).find((p) => p.id === id);
@@ -234,6 +284,49 @@ export function UniverseCanvas({ onNewSystem, onNewGalaxy }: { onNewSystem: (gal
     [viewFor, animateTo],
   );
 
+  /* ---------- depth: going into a group or a galaxy's inside, and back ---------- */
+
+  /** What to frame once the sky of the scope just gone to is drawn. */
+  const pending = useRef<Target | null>(null);
+  const goScope = useCallback((next: string, then: Target = { kind: 'universe' }) => {
+    if (next === scopeRef.current) return;
+    pending.current = then;
+    locked.current = null;
+    setQuickAdd(null);
+    verseSwitch.emit(); // the same plain crossfade as a change of verse
+    setScopeAt({ verse: orbit().host?.shown ?? '', scope: next });
+  }, []);
+  const leaveScope = useCallback(() => {
+    const up = depthRef.current.parentOf(scopeRef.current);
+    if (up !== null) goScope(up);
+  }, [goScope]);
+  /**
+   * Whether a target is in the sky now. When it is somewhere else in this verse (inside a group, or inside another
+   * galaxy), the sky goes there and the target is framed once it is drawn: false, nothing more to do.
+   */
+  const reach = useCallback(
+    (t: Target): boolean => {
+      if (t.kind === 'universe') return true;
+      const gs = galaxiesRef.current;
+      if (t.kind === 'galaxy' ? gs.some((g) => g.id === t.id) : gs.some((g) => g.systems.some((x) => x.pv.project.id === t.id))) return true;
+      const d = depthRef.current;
+      const s = orbit();
+      const groupsNow = s.host?.sky?.groups ?? s.groups;
+      let home: string | null = null;
+      if (t.kind === 'galaxy') {
+        if (groupsNow.some((g) => g.id === t.id)) home = d.scopeOf(t.id);
+        else if (d.has(t.id) && t.id !== TOP) home = d.parentOf(t.id); // a group itself: where its body is
+      } else {
+        const sys = (s.host?.sky?.projects ?? s.projects).find((x) => x.id === t.id);
+        if (sys) home = sys.groupId && groupsNow.some((g) => g.id === sys.groupId) ? d.scopeOf(sys.groupId) : TOP;
+      }
+      if (home === null || home === scopeRef.current) return true; // not in this verse, or not drawn yet
+      goScope(home, t);
+      return false;
+    },
+    [goScope],
+  );
+
   /* ---------- sizing ---------- */
 
   useLayoutEffect(() => {
@@ -272,11 +365,29 @@ export function UniverseCanvas({ onNewSystem, onNewGalaxy }: { onNewSystem: (gal
     }
   }, [size.w, size.h, size.top, viewFor, setView]);
 
+  // The sky of a scope just gone to: framed at once (the crossfade hides the jump).
+  useEffect(() => {
+    const t = pending.current;
+    if (!t || !size.w) return;
+    const v = viewFor(t) ?? viewFor({ kind: 'universe' });
+    if (!v) return;
+    pending.current = null;
+    stopAnim();
+    locked.current = viewFor(t) ? t : { kind: 'universe' };
+    setView(v);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [galaxies, scope, size.w]);
+
   // Requests from elsewhere (search, panels). After a verse switch the jump is at once (the crossfade hides it).
   const lastFlight = useRef(0);
   useEffect(() => {
     if (!flight || flight.nonce === lastFlight.current || !size.w) return;
     const t: Target = flight.kind === 'universe' || !flight.id ? { kind: 'universe' } : ({ kind: flight.kind, id: flight.id } as Target);
+    if (!reach(t)) {
+      // inside a group or another galaxy: the sky goes there first, and frames it
+      lastFlight.current = flight.nonce;
+      return;
+    }
     if (flight.instant) {
       const v = viewFor(t);
       if (!v) return; // the verse's sky is not drawn yet: try again when it is
@@ -290,7 +401,7 @@ export function UniverseCanvas({ onNewSystem, onNewGalaxy }: { onNewSystem: (gal
     lastFlight.current = flight.nonce;
     flyTo(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [flight, size.w, flyTo, galaxies]);
+  }, [flight, size.w, flyTo, galaxies, reach]);
 
   /* ---------- switching verse: a plain crossfade from the old sky ---------- */
 
@@ -345,7 +456,19 @@ export function UniverseCanvas({ onNewSystem, onNewGalaxy }: { onNewSystem: (gal
     const c = ctxRef.current;
     if (c.system && c.galaxy) flyTo({ kind: 'galaxy', id: c.galaxy.id });
     else if (c.galaxy) flyTo({ kind: 'universe' });
-  }, [flyTo]);
+    else leaveScope();
+  }, [flyTo, leaveScope]);
+
+  // Zooming into a group goes into it; zooming far out of one goes back out.
+  // (only by the person's own zooming: a sky just framed, or one still to be framed, goes nowhere by itself)
+  const insideClosed = ctx.galaxy?.host?.closed && !pending.current && !locked.current && !anim.current ? ctx.galaxy.id : null;
+  useEffect(() => {
+    if (insideClosed && !dragNow.current) goScope(insideClosed);
+  }, [insideClosed, goScope]);
+  const farOut = scope !== TOP && !!view && !!size.w && !anim.current && !pending.current && !locked.current && galaxies.length > 0 && view.k < fitUniverse(galaxies, size).k * 0.45;
+  useEffect(() => {
+    if (farOut) leaveScope();
+  }, [farOut, leaveScope]);
 
   const sibling = useCallback(
     (dir: 1 | -1) => {
@@ -371,7 +494,7 @@ export function UniverseCanvas({ onNewSystem, onNewGalaxy }: { onNewSystem: (gal
     if (e.metaKey || e.ctrlKey || e.altKey) return;
     if (e.key === 'Escape') {
       if (s.selection) return; // the app closes the panel first
-      if (ctxRef.current.galaxy) {
+      if (ctxRef.current.galaxy || scopeRef.current !== TOP) {
         e.preventDefault();
         goUp();
       }
@@ -534,7 +657,7 @@ export function UniverseCanvas({ onNewSystem, onNewGalaxy }: { onNewSystem: (gal
       return;
     }
     const others = galaxiesRef.current;
-    const over = galaxyAt(others, x, y);
+    const over = galaxyAt(others.filter((g) => !g.host?.closed), x, y);
     setDrag({ kind: 'system', id: d.id, wx: x, wy: y, origin: d.origin, target: over?.id ?? null });
   };
 
@@ -675,6 +798,10 @@ export function UniverseCanvas({ onNewSystem, onNewGalaxy }: { onNewSystem: (gal
   };
   const onGalaxyClick = (g: GalaxyPlace) => {
     if (suppressClick.current) return;
+    if (g.host?.closed) {
+      goScope(g.id);
+      return;
+    }
     if (ctx.galaxy?.id === g.id && !ctx.system && !g.virtual) select({ type: 'group', id: g.id });
     else flyTo({ kind: 'galaxy', id: g.id });
   };
@@ -695,7 +822,7 @@ export function UniverseCanvas({ onNewSystem, onNewGalaxy }: { onNewSystem: (gal
   /** A portal's chip: the other verse, in the same galaxy. */
   const throughPortal = (s: SystemPlace) => {
     if (suppressClick.current || !s.portal) return;
-    void useOrbit.getActions().showVerse(s.portal.verse, { galaxy: s.galaxyId === DEEP_SPACE_ID ? undefined : s.galaxyId });
+    void useOrbit.getActions().showVerse(s.portal.verse, { galaxy: s.portal.galaxy ?? (s.galaxyId === DEEP_SPACE_ID ? undefined : s.galaxyId) });
   };
   const [hovered, setHovered] = useState<string | null>(null);
 
@@ -861,7 +988,7 @@ export function UniverseCanvas({ onNewSystem, onNewGalaxy }: { onNewSystem: (gal
                 dimmed={dim && !g.matches}
                 inside={ctx.galaxy?.id === g.id}
                 dragging={drag?.kind === 'galaxy' && drag.id === g.id}
-                onPointerDown={(e) => startDrag(e, 'galaxy', g.id, g.x, g.y)}
+                onPointerDown={(e) => (g.host?.closed ? e.stopPropagation() : startDrag(e, 'galaxy', g.id, g.x, g.y))}
                 dropTarget={drag?.kind === 'system' && drag.target === g.id && drag.origin !== g.id}
                 onClick={() => onGalaxyClick(g)}
               />
@@ -1163,7 +1290,7 @@ export function UniverseCanvas({ onNewSystem, onNewGalaxy }: { onNewSystem: (gal
       {/* ---------- chrome ---------- */}
       <div ref={chrome} data-ui className="pointer-events-none absolute inset-x-0 top-0 flex flex-col gap-2 p-3 md:p-4">
       <div className="flex flex-nowrap items-start gap-2">
-        <Breadcrumbs ctx={ctx} galaxies={galaxies} onFly={flyTo} onUp={goUp} compact={compact} />
+        <Breadcrumbs ctx={ctx} galaxies={galaxies} onFly={flyTo} onUp={goUp} compact={compact} path={depth.path(scope)} onScope={(to) => (to === scope ? flyTo({ kind: 'universe' }) : goScope(to))} />
         <div className="flex-1" />
         <div className="pointer-events-auto flex shrink-0 flex-nowrap items-center justify-end gap-2">
           <div
@@ -1222,7 +1349,7 @@ export function UniverseCanvas({ onNewSystem, onNewGalaxy }: { onNewSystem: (gal
           />}
         </div>
       </div>
-      {can.hosted && <VerseBar ctxGalaxy={ctx.galaxy && !ctx.galaxy.virtual ? ctx.galaxy.id : null} compact={compact} />}
+      {can.hosted && <VerseBar ctxGalaxy={ctx.galaxy && !ctx.galaxy.virtual ? ctx.galaxy.id : null} ctxSystem={ctx.system && !ctx.system.portal ? ctx.system.pv.project.id : null} compact={compact} />}
       </div>
 
       {view && galaxies.length > 0 && <Minimap galaxies={galaxies} view={view} size={size} W={mini.w} H={mini.h} onFly={flyTo} onPan={(v) => { locked.current = null; animateTo(v); }} />}
@@ -1248,7 +1375,24 @@ export function UniverseCanvas({ onNewSystem, onNewGalaxy }: { onNewSystem: (gal
 
 /* ================= pieces ================= */
 
-function Breadcrumbs({ ctx, galaxies, onFly, onUp, compact = false }: { ctx: { galaxy: GalaxyPlace | null; system: SystemPlace | null }; galaxies: GalaxyPlace[]; onFly: (t: Target) => void; onUp: () => void; compact?: boolean }) {
+function Breadcrumbs({
+  ctx,
+  galaxies,
+  onFly,
+  onUp,
+  compact = false,
+  path = [],
+  onScope,
+}: {
+  ctx: { galaxy: GalaxyPlace | null; system: SystemPlace | null };
+  galaxies: GalaxyPlace[];
+  onFly: (t: Target) => void;
+  onUp: () => void;
+  compact?: boolean;
+  /** The groups (and galaxies) gone into, from the top down. */
+  path?: { scope: string; name: string }[];
+  onScope?: (scope: string) => void;
+}) {
   const crumb = cx('inline-flex h-8 min-w-0 items-center gap-1.5 rounded-lg px-2.5 text-[13px] font-medium transition-colors hover:bg-surface-3', compact ? 'max-w-[150px]' : 'max-w-[200px]');
   const galaxyItems = galaxies.map((g) => ({
     label: `${g.name}${g.virtual ? '' : ` · ${g.systems.length}`}`,
@@ -1257,12 +1401,28 @@ function Breadcrumbs({ ctx, galaxies, onFly, onUp, compact = false }: { ctx: { g
   }));
   return (
     <nav aria-label="Where you are in the universe" className="pointer-events-auto flex min-w-0 shrink items-center gap-0.5 overflow-hidden rounded-xl border border-line bg-surface/80 p-1 shadow-panel backdrop-blur-xl">
-      <IconButton label="Up a level (Esc)" size="sm" onClick={onUp} disabled={!ctx.galaxy}>
+      <IconButton label="Up a level (Esc)" size="sm" onClick={onUp} disabled={!ctx.galaxy && !path.length}>
         <CornerLeftUp size={16} />
       </IconButton>
-      <button className={cx(crumb, 'shrink-0', !ctx.galaxy ? 'text-text' : 'text-muted')} onClick={() => onFly({ kind: 'universe' })} aria-current={!ctx.galaxy ? 'location' : undefined} title="Universe">
-        <Sparkles size={14} className="shrink-0 text-accent-ink" /> {!compact || !ctx.galaxy ? 'Universe' : <span className="sr-only">Universe</span>}
+      <button
+        className={cx(crumb, 'shrink-0', !ctx.galaxy && !path.length ? 'text-text' : 'text-muted')}
+        onClick={() => (path.length && onScope ? onScope(TOP) : onFly({ kind: 'universe' }))}
+        aria-current={!ctx.galaxy && !path.length ? 'location' : undefined}
+        title="Universe"
+      >
+        <Sparkles size={14} className="shrink-0 text-accent-ink" /> {!compact || (!ctx.galaxy && !path.length) ? 'Universe' : <span className="sr-only">Universe</span>}
       </button>
+      {path.map((step, i) => {
+        const here = i === path.length - 1 && !ctx.galaxy;
+        return (
+          <span key={step.scope} className="flex min-w-0 items-center" data-depth-step>
+            <ChevronRight size={14} className="shrink-0 text-faint" />
+            <button className={cx(crumb, here ? 'text-text' : 'text-muted')} onClick={() => onScope?.(step.scope)} aria-current={here ? 'location' : undefined} title={step.name}>
+              <span className="truncate">{step.name}</span>
+            </button>
+          </span>
+        );
+      })}
       {ctx.galaxy ? (
         <>
           <ChevronRight size={14} className="shrink-0 text-faint" />
@@ -1360,13 +1520,17 @@ function GalaxyLabel({
   const auto = beside === 'left' ? 'ml-auto' : beside === 'right' ? 'mr-auto' : 'mx-auto';
   const pct = g.total ? Math.round((g.done / g.total) * 100) : 0;
   const counts = galaxyCountText(g);
-  const label = `${g.name} galaxy: ${counts}.${g.overdue ? ` ${g.overdue} overdue.` : ''}${g.changed ? ` ${changedText(g.changed)}.` : ''}${inside && !g.virtual ? ' Open details.' : ' Fly in.'}`;
+  const closed = !!g.host?.closed;
+  const label = closed
+    ? `${g.name} group: ${counts}. Go in.`
+    : `${g.name} galaxy: ${counts}.${g.overdue ? ` ${g.overdue} overdue.` : ''}${g.changed ? ` ${changedText(g.changed)}.` : ''}${inside && !g.virtual ? ' Open details.' : ' Fly in.'}`;
   return (
     <button
       aria-label={label}
       data-galaxy={g.id}
       data-changed={g.changed || undefined}
-      title={g.virtual ? 'Projects without a galaxy — drag to move' : `${g.name}${brief ? ` (${counts})` : ''} — click to ${inside ? 'see details' : 'fly in'}, drag to move`}
+      data-group={closed || undefined}
+      title={closed ? `${g.name} (${counts}): click, or zoom in, to go in` : g.virtual ? 'Projects without a galaxy — drag to move' : `${g.name}${brief ? ` (${counts})` : ''} — click to ${inside ? 'see details' : 'fly in'}, drag to move`}
       onPointerDown={onPointerDown}
       onClick={onClick}
       className={cx(

@@ -76,7 +76,7 @@ export interface SystemPlace {
   /** Busy because of its items (they are the dots). */
   busyItems: boolean;
   /** A system that leads to another verse: drawn as a portal. */
-  portal?: { verse: string; label?: string };
+  portal?: { verse: string; label?: string; galaxy?: string };
   /** The system's belt (what it holds that no planet uses), at radius r (world units). */
   belt: { r: number; collection: Collection; haze: boolean } | null;
   /** Beacons drawn beside the system. */

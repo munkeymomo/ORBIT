@@ -257,6 +257,28 @@ the most precise one given is not there, a toast says so. When the target verse 
 A system with `portal: { verse, label? }` leads to another verse. It is drawn as a violet swirl (not a star) with a
 chip "to <verse name>" (or `label`); the chip, or the button in its panel, switches to that verse in the same galaxy.
 
+A portal may name a `galaxy` as well: it then leads to that galaxy (in the verse on screen there is no verse switch,
+only the flight). This is the way into a galaxy that is inside another (below).
+
+## Depth: groups that are gone into, and galaxies inside galaxies
+
+New in this revision (additive). A host with many galaxies need not show them all at once.
+
+- A cluster with `enter: true` is a group: its galaxies are out of the sky and the group shows as one body, with its
+  name and how many galaxies and groups it holds. Clicking it, or zooming into it, goes in: the sky then holds only
+  what is directly inside. A cluster may sit inside another (`parent`), to any depth. A cluster without `enter` is
+  the faint outline it always was, wherever its galaxies are shown.
+- A galaxy with `parent: <galaxy id>` is inside that galaxy: it is out of the sky until it is gone into, by a portal
+  system in the parent (`portal: { verse, galaxy }`), by the path, or by anything that flies to it.
+- The path (Universe, then each group or galaxy gone into) is shown beside the galaxy's and system's names; Escape,
+  the up arrow and zooming far out go back one step.
+- A wormhole, a search result or a flight from anywhere else to something inside a group goes into the groups on
+  the way by itself.
+- A record may be a galaxy in one verse and a system in another, under the same id: a change of verse, a portal or
+  a wormhole that names it lands on whichever it is there.
+- Each level is laid out on its own: a galaxy sits where the person put it, otherwise in the next free place among
+  those shown with it. A group's body cannot be moved.
+
 ## Actions
 
 New in this revision (additive): a verse, a galaxy or a system may list things the host does in a dialog of its own.

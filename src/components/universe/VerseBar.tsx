@@ -7,7 +7,7 @@ import { cx } from '../ui/primitives';
  * word under it, the one-line legend of the verse on screen, and the verse's own actions (the host's dialogs).
  * Switching keeps the camera on the same galaxy: the galaxy the person is in is the galaxy's wormhole.
  */
-export function VerseBar({ ctxGalaxy, compact = false }: { ctxGalaxy: string | null; compact?: boolean }) {
+export function VerseBar({ ctxGalaxy, ctxSystem = null, compact = false }: { ctxGalaxy: string | null; ctxSystem?: string | null; compact?: boolean }) {
   const verses = useOfferedVerses();
   const shown = useOrbit((s) => s.host?.shown ?? '');
   const { showVerse, hostAction } = useOrbit.getActions();
@@ -26,7 +26,7 @@ export function VerseBar({ ctxGalaxy, compact = false }: { ctxGalaxy: string | n
               data-verse={v.id}
               aria-pressed={on}
               title={`${v.name}: ${v.legend}`}
-              onClick={() => !on && void showVerse(v.id, ctxGalaxy ? { galaxy: ctxGalaxy } : undefined)}
+              onClick={() => !on && void showVerse(v.id, ctxGalaxy ? { galaxy: ctxGalaxy, ...(ctxSystem ? { system: ctxSystem } : {}) } : undefined)}
               className={cx(
                 'flex min-w-[78px] flex-col items-center justify-center rounded-lg px-3 py-1 leading-tight transition-colors',
                 on ? 'bg-[#b18cff]/20 text-text ring-1 ring-[#b18cff]/70' : 'text-muted hover:bg-surface-3 hover:text-text',

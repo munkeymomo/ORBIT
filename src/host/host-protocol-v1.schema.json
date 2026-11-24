@@ -148,6 +148,7 @@
         "chip": { "type": "string", "description": "The chip's text, e.g. a kind and a status." },
         "finished": { "type": "boolean", "description": "Hidden unless finished galaxies are shown." },
         "cluster": { "$ref": "#/$defs/id" },
+        "parent": { "$ref": "#/$defs/id", "description": "This galaxy is inside that one: out of the sky until that galaxy is gone into." },
         "virtual": { "type": "boolean", "description": "Not a record of the host's: a holder for loose systems." },
         "facts": { "type": "array", "items": { "$ref": "#/$defs/fact" } },
         "caps": { "$ref": "#/$defs/caps" },
@@ -159,9 +160,15 @@
       "additionalProperties": false
     },
     "cluster": {
-      "description": "A faint label around galaxies that belong together.",
+      "description": "Galaxies that belong together: a faint outline with its name, or with `enter` a group that is gone into.",
       "type": "object",
-      "properties": { "id": { "$ref": "#/$defs/id" }, "name": { "type": "string" }, "open": { "$ref": "#/$defs/open" } },
+      "properties": {
+        "id": { "$ref": "#/$defs/id" },
+        "name": { "type": "string" },
+        "open": { "$ref": "#/$defs/open" },
+        "parent": { "$ref": "#/$defs/id", "description": "The cluster this one is inside." },
+        "enter": { "type": "boolean", "description": "A group that is gone into: its galaxies are out of the sky until then." }
+      },
       "required": ["id", "name"],
       "additionalProperties": false
     },
@@ -177,9 +184,9 @@
         "color": { "type": "string" },
         "virtual": { "type": "boolean", "description": "A holder the host made up (e.g. for tasks filed nowhere)." },
         "portal": {
-          "description": "This system leads to another verse.",
+          "description": "This system leads to another verse, or with `galaxy` to that galaxy there (the way into a galaxy inside this one).",
           "type": "object",
-          "properties": { "verse": { "$ref": "#/$defs/id" }, "label": { "type": "string" } },
+          "properties": { "verse": { "$ref": "#/$defs/id" }, "label": { "type": "string" }, "galaxy": { "$ref": "#/$defs/id" } },
           "required": ["verse"],
           "additionalProperties": false
         },

@@ -71,7 +71,10 @@ export function resolveLanding(c: VerseContent, land: Landing | undefined): Reso
     }
   }
   if (land.system && c.projects.some((p) => p.id === land.system)) return { flight: { kind: 'system', id: land.system }, missing: asked !== 'system' };
+  // the same record may be a system in one verse and a galaxy in another (an id is the record's, whatever it is drawn as)
+  if (land.system && c.groups.some((g) => g.id === land.system)) return { flight: { kind: 'galaxy', id: land.system }, missing: asked !== 'system' };
   if (land.galaxy && c.groups.some((g) => g.id === land.galaxy)) return { flight: { kind: 'galaxy', id: land.galaxy }, missing: asked !== 'galaxy' };
+  if (land.galaxy && c.projects.some((p) => p.id === land.galaxy)) return { flight: { kind: 'system', id: land.galaxy }, missing: asked !== 'galaxy' };
   return { flight: { kind: 'universe', id: null }, missing: asked !== null };
 }
 

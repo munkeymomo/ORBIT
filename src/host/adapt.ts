@@ -12,6 +12,7 @@
  */
 import type { Group, HostRef, Placement, Priority, Project, Task } from '../types';
 import type { Also, Arrow, Attachment, AttachmentState, Beacon, Caps, Cluster, Collection, Fact, Family, Galaxy, Open, Planet, System, Verse } from './types';
+import { buildDepth, TOP } from './depth';
 import { findFreeSpot, nextGalaxySpot, SYSTEM_SPACING, type Pt } from '../data/layout';
 import { PROJECT_COLORS } from '../lib/colors';
 import { isValidDateKey } from '../lib/util';
@@ -74,11 +75,16 @@ export interface HostExtras {
   /** By system id. */
   collections: Record<string, Collection>;
   beacons: Beacon[];
-  clusters: Cluster[];
+  /** A group that is gone into carries where its body sits among what is shown with it (`at`). */
+  clusters: PlacedCluster[];
   /** Item planets, by system id, in verse order. */
   items: Record<string, ItemPlanet[]>;
   /** Relations between planets of this verse whose two ends it has. */
   arrows: Arrow[];
+}
+
+export interface PlacedCluster extends Cluster {
+  at?: Pt;
 }
 
 export const NO_EXTRAS: HostExtras = { families: {}, attachments: {}, collections: {}, beacons: [], clusters: [], items: {}, arrows: [] };
@@ -125,6 +131,7 @@ function galaxyRef(verse: string, g: Galaxy): HostRef {
     virtual: g.virtual,
     finished: g.finished,
     cluster: g.cluster,
+    parent: g.parent,
     facts: g.facts,
     open: g.open,
     also: g.also,
@@ -146,7 +153,10 @@ function systemRef(verse: string, s: System): HostRef {
     facts: s.facts,
     open: s.open,
     also: s.also,
-    portal: s.portal && typeof s.portal.verse === 'string' && s.portal.verse ? { verse: s.portal.verse, label: s.portal.label } : undefined,
+    portal:
+      s.portal && typeof s.portal.verse === 'string' && s.portal.verse
+        ? { verse: s.portal.verse, label: s.portal.label, ...(typeof s.portal.galaxy === 'string' && s.portal.galaxy ? { galaxy: s.portal.galaxy } : {}) }
+        : undefined,
     actions: actionsOf(s.actions),
   };
 }
@@ -272,31 +282,48 @@ export function adaptVerse(v: Verse, placements: Placement[], opts: AdaptOptions
   const holderOf = (s: System) => (s.galaxy && galaxyIds.has(s.galaxy) ? s.galaxy : DEEP_SPACE);
   const deepUsed = !!opts.deepUsed || systems.some((s) => holderOf(s) === DEEP_SPACE);
 
-  /* galaxy centres: placed ones first, then free spiral slots in verse order */
+  /* galaxy centres: placed ones first, then free spiral slots in verse order. Each scope (the top, each group that
+     is gone into, the inside of a galaxy) is laid out on its own: only one is ever in the sky (host/depth.ts). */
+  const depth = buildDepth(galaxies, v.clusters ?? []);
   const centres = new Map<string, Pt>();
-  const taken: Pt[] = [...(opts.taken ?? [])];
+  const takenBy = new Map<string, Pt[]>([[TOP, [...(opts.taken ?? [])]]]);
+  const takenIn = (scope: string): Pt[] => {
+    let t = takenBy.get(scope);
+    if (!t) takenBy.set(scope, (t = []));
+    return t;
+  };
   for (const g of galaxies) {
     const p = placed.get(placementKey.galaxy(g.id));
     if (p) {
       centres.set(g.id, round(p));
-      taken.push(round(p));
+      takenIn(depth.scopeOf(g.id)).push(round(p));
     }
   }
   const deepPlaced = deepUsed ? (placed.get(placementKey.galaxy(DEEP_SPACE)) ?? opts.deepAt) : undefined;
-  if (deepPlaced) taken.push(round(deepPlaced));
+  if (deepPlaced) takenIn(TOP).push(round(deepPlaced));
   for (const g of galaxies) {
     const known = opts.centres?.get(g.id);
     if (centres.has(g.id) || !known) continue;
     centres.set(g.id, round(known));
-    taken.push(round(known));
+    takenIn(depth.scopeOf(g.id)).push(round(known));
+  }
+  /* a group's body, among what is shown with it: before the galaxies with no place yet, in the host's order */
+  const groupAt = new Map<string, Pt>();
+  for (const scope of depth.scopes) {
+    for (const c of depth.groupsIn(scope)) {
+      const spot = nextGalaxySpot(takenIn(scope));
+      groupAt.set(c.id, spot);
+      takenIn(scope).push(spot);
+    }
   }
   for (const g of galaxies) {
     if (centres.has(g.id)) continue;
+    const taken = takenIn(depth.scopeOf(g.id));
     const spot = nextGalaxySpot(taken);
     centres.set(g.id, spot);
     taken.push(spot);
   }
-  const deepSpace = deepUsed ? (deepPlaced ? round(deepPlaced) : nextGalaxySpot(taken)) : null;
+  const deepSpace = deepUsed ? (deepPlaced ? round(deepPlaced) : nextGalaxySpot(takenIn(TOP))) : null;
 
   /* system positions inside each galaxy (or deep space) */
   const rel = new Map<string, Pt>();
@@ -390,7 +417,7 @@ export function adaptVerse(v: Verse, placements: Placement[], opts: AdaptOptions
     projects,
     tasks,
     deepSpace,
-    extras: { families: v.families ?? {}, attachments, collections, beacons, clusters: v.clusters ?? [], items, arrows },
+    extras: { families: v.families ?? {}, attachments, collections, beacons, clusters: (v.clusters ?? []).map((c) => (groupAt.has(c.id) ? { ...c, at: groupAt.get(c.id) } : c)), items, arrows },
     skipped,
   };
 }
