@@ -67,9 +67,19 @@ test('a galaxy inside a galaxy is reached by its portal, and the path leads back
   await page.goto('/?orbit-host=demo-readonly&depth=1#universe');
   await page.locator('[data-verse="things"]').click();
   await expect(page.locator('[data-verse="things"]')).toHaveAttribute('aria-pressed', 'true');
-  // a change of verse starts at the top again
+  // a change of verse from the top stays at the top
   await expect(group(page, 'Around the house')).toBeVisible();
+  // ... and from inside a group, it lands inside the same group in the other verse
   await group(page, 'Around the house').click();
+  await expect(galaxy(page, 'Garden')).toBeVisible();
+  await page.locator('[data-verse="notes"]').click();
+  await expect(page.locator('[data-verse="notes"]')).toHaveAttribute('aria-pressed', 'true');
+  await expect(crumbs(page).locator('[data-depth-step]')).toHaveCount(1);
+  await expect(galaxy(page, 'Garden')).toBeVisible();
+  await expect(group(page, 'Around the house')).toHaveCount(0);
+  await page.locator('[data-verse="things"]').click();
+  await expect(page.locator('[data-verse="things"]')).toHaveAttribute('aria-pressed', 'true');
+  await expect(galaxy(page, 'Garden')).toBeVisible();
   await group(page, 'Trade and markets').click();
   // the stall is not in the sky beside the bakery: it is inside it
   await expect(galaxy(page, 'Bakery')).toBeVisible();

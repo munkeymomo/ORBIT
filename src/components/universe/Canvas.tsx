@@ -308,6 +308,11 @@ export function UniverseCanvas({ onNewSystem, onNewGalaxy }: { onNewSystem: (gal
     (t: Target): boolean => {
       if (t.kind === 'universe') return true;
       const gs = galaxiesRef.current;
+      if (t.kind === 'galaxy' && gs.find((g) => g.id === t.id)?.host?.closed) {
+        // a group whose body is in the sky: a flight to it goes in
+        goScope(t.id);
+        return false;
+      }
       if (t.kind === 'galaxy' ? gs.some((g) => g.id === t.id) : gs.some((g) => g.systems.some((x) => x.pv.project.id === t.id))) return true;
       const d = depthRef.current;
       const s = orbit();
