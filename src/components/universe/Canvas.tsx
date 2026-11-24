@@ -201,9 +201,26 @@ export function UniverseCanvas({ onNewSystem, onNewGalaxy }: { onNewSystem: (gal
   /** A system of the verse on screen, by id. */
   const projectOf = (id: string) => (orbit().host?.sky?.projects ?? orbit().projects).find((p) => p.id === id);
   const galaxies = useMemo(
-    () => buildSpace(shownModel, shownGroups, deepSpace, dim, spaceDrag, extras),
+    () => {
+      const built = buildSpace(shownModel, shownGroups, deepSpace, dim, spaceDrag, extras);
+      if (!depth.deep) return built;
+      // a closed group stands for what is inside it: something that changed there, or that matches the highlight
+      // or a filter, is still seen from outside
+      return built.map((g) => {
+        if (!g.host?.closed) return g;
+        const inside = new Set(depth.under(g.id));
+        const within = model.filter((pv) => !!pv.project.groupId && inside.has(pv.project.groupId));
+        return {
+          ...g,
+          changed: within.reduce((n, pv) => n + (pv.changed?.moons ?? 0), 0),
+          changedPlanets: within.reduce((n, pv) => n + (pv.changed?.planets.length ?? 0), 0),
+          matches: !dim || within.some((pv) => pv.matches),
+          hasActive: within.some((pv) => pv.hasActive),
+        };
+      });
+    },
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [shownModel, shownGroups, deepSpace, dim, extras, drag?.kind, drag?.id, drag && 'wx' in drag ? drag.wx : drag?.x, drag && 'wy' in drag ? drag.wy : drag?.y],
+    [shownModel, shownGroups, deepSpace, dim, extras, depth, model, drag?.kind, drag?.id, drag && 'wx' in drag ? drag.wx : drag?.x, drag && 'wy' in drag ? drag.wy : drag?.y],
   );
   const galaxiesRef = useRef(galaxies);
   galaxiesRef.current = galaxies;
@@ -1531,7 +1548,7 @@ function GalaxyLabel({
   const counts = galaxyCountText(g);
   const closed = !!g.host?.closed;
   const label = closed
-    ? `${g.name} group: ${counts}. Go in.`
+    ? `${g.name} group: ${counts}.${g.changed ? ` ${changedText(g.changed)}.` : ''} Go in.`
     : `${g.name} galaxy: ${counts}.${g.overdue ? ` ${g.overdue} overdue.` : ''}${g.changed ? ` ${changedText(g.changed)}.` : ''}${inside && !g.virtual ? ' Open details.' : ' Fly in.'}`;
   return (
     <button

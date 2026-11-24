@@ -16,10 +16,12 @@ test('the sky holds one level: groups are gone into and come back out of', async
 
   // the top: one body for the group, none of the galaxies inside it
   await expect(group(page, 'Around the house')).toBeVisible();
-  await expect(group(page, 'Around the house')).toHaveAccessibleName(/5 galaxies · 1 group\. Go in\./);
+  await expect(group(page, 'Around the house')).toHaveAccessibleName(/5 galaxies · 1 group\. 1 changed\. Go in\./);
   await expect(galaxy(page, 'Garden')).toHaveCount(0);
   await expect(galaxy(page, 'Bakery')).toHaveCount(0);
   await expect(page.getByText('Around the house', { exact: true })).toHaveCount(1);
+  // what changed inside it is still seen from outside
+  await expect(page.locator('[data-galaxy="c-home"]')).toHaveAttribute('data-changed', /^[1-9]/);
 
   // in: its three galaxies and the group inside it; the path says where
   await group(page, 'Around the house').click();
