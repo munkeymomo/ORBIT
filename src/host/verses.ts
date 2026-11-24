@@ -42,6 +42,8 @@ export interface VerseContent {
   projects: Pick<Project, 'id' | 'groupId'>[];
   tasks: Pick<Task, 'id' | 'projectId'>[];
   items: Record<string, Pick<ItemPlanet, 'id' | 'system' | 'moons'>[]>;
+  /** The verse's clusters: a group that is gone into can be landed in. */
+  clusters?: { id: string; enter?: boolean }[];
 }
 
 export interface Resolved {
@@ -75,6 +77,9 @@ export function resolveLanding(c: VerseContent, land: Landing | undefined): Reso
   if (land.system && c.groups.some((g) => g.id === land.system)) return { flight: { kind: 'galaxy', id: land.system }, missing: asked !== 'system' };
   if (land.galaxy && c.groups.some((g) => g.id === land.galaxy)) return { flight: { kind: 'galaxy', id: land.galaxy }, missing: asked !== 'galaxy' };
   if (land.galaxy && c.projects.some((p) => p.id === land.galaxy)) return { flight: { kind: 'system', id: land.galaxy }, missing: asked !== 'galaxy' };
+  // ... or a group that is gone into: the Universe goes in (the flight names the group)
+  const group = [land.system, land.galaxy].find((id) => !!id && c.clusters?.some((x) => x.id === id && x.enter));
+  if (group) return { flight: { kind: 'galaxy', id: group }, missing: false };
   return { flight: { kind: 'universe', id: null }, missing: asked !== null };
 }
 

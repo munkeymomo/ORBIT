@@ -766,8 +766,8 @@ export function createOrbitStore(deps: StoreDeps = {}): StoreApi<OrbitState> {
     const contentShown = () => {
       const h = get().host!;
       return h.sky
-        ? { groups: h.sky.groups, projects: h.sky.projects, tasks: [] as Task[], items: h.sky.items }
-        : { groups: get().groups, projects: get().projects, tasks: get().tasks, items: h.items };
+        ? { groups: h.sky.groups, projects: h.sky.projects, tasks: [] as Task[], items: h.sky.items, clusters: h.sky.clusters }
+        : { groups: get().groups, projects: get().projects, tasks: get().tasks, items: h.items, clusters: h.clusters };
     };
 
     const verseName = (id: string) => get().host?.info.verses.find((v) => v.id === id)?.name ?? id;

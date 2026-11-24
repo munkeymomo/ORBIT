@@ -315,7 +315,11 @@ export function UniverseCanvas({ onNewSystem, onNewGalaxy }: { onNewSystem: (gal
       let home: string | null = null;
       if (t.kind === 'galaxy') {
         if (groupsNow.some((g) => g.id === t.id)) home = d.scopeOf(t.id);
-        else if (d.has(t.id) && t.id !== TOP) home = d.parentOf(t.id); // a group itself: where its body is
+        else if (d.has(t.id) && t.id !== TOP) {
+          // a group itself (the same record is a galaxy in another verse): go in
+          goScope(t.id);
+          return false;
+        }
       } else {
         const sys = (s.host?.sky?.projects ?? s.projects).find((x) => x.id === t.id);
         if (sys) home = sys.groupId && groupsNow.some((g) => g.id === sys.groupId) ? d.scopeOf(sys.groupId) : TOP;
@@ -1349,7 +1353,7 @@ export function UniverseCanvas({ onNewSystem, onNewGalaxy }: { onNewSystem: (gal
           />}
         </div>
       </div>
-      {can.hosted && <VerseBar ctxGalaxy={ctx.galaxy && !ctx.galaxy.virtual ? ctx.galaxy.id : null} ctxSystem={ctx.system && !ctx.system.portal ? ctx.system.pv.project.id : null} compact={compact} />}
+      {can.hosted && <VerseBar ctxGalaxy={ctx.galaxy && !ctx.galaxy.virtual ? ctx.galaxy.id : scope === TOP ? null : scope.startsWith('g:') ? scope.slice(2) : scope} ctxSystem={ctx.system && !ctx.system.portal ? ctx.system.pv.project.id : null} compact={compact} />}
       </div>
 
       {view && galaxies.length > 0 && <Minimap galaxies={galaxies} view={view} size={size} W={mini.w} H={mini.h} onFly={flyTo} onPan={(v) => { locked.current = null; animateTo(v); }} />}

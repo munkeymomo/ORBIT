@@ -134,6 +134,10 @@ describe('landing on a record that is a galaxy in one verse and a system in anot
     expect(resolveLanding(content, { galaxy: 'project:a', system: 'wp:1' }).flight).toEqual({ kind: 'system', id: 'wp:1' });
     expect(resolveLanding(content, { galaxy: 'project:a', system: 'wp:gone' }).flight).toEqual({ kind: 'galaxy', id: 'project:a' });
     expect(resolveLanding(content, { galaxy: 'nowhere' })).toEqual({ flight: { kind: 'universe', id: null }, missing: true });
+    // a record that is only a group there (it holds nothing itself in that verse): the flight names the group
+    const grouped = { ...content, clusters: [{ id: 'project:f', enter: true }, { id: 'project:o' }] };
+    expect(resolveLanding(grouped, { galaxy: 'project:f' })).toEqual({ flight: { kind: 'galaxy', id: 'project:f' }, missing: false });
+    expect(resolveLanding(grouped, { galaxy: 'project:o' }).flight).toEqual({ kind: 'universe', id: null });
   });
 
   it('counts the galaxies anywhere inside a group, nearest first', () => {
