@@ -62,7 +62,7 @@ function timeout<T>(p: Promise<T>, ms: number): Promise<T> {
 }
 
 function startAtParam(v: string | null): StartAt | undefined {
-  const m = v?.match(/^(galaxy|system|planet):(.+)$/);
+  const m = v?.match(/^(verse|galaxy|system|planet):(.+)$/);
   return m ? { [m[1]]: m[2] } : undefined;
 }
 
@@ -90,10 +90,12 @@ export async function detectHost(win: Window = window, opts: { timeoutMs?: numbe
         // the editable demo keeps ORBIT's own records too, unless `&personal=0`
         personal: editable && p.get('personal') !== '0',
         adopt: adopt === 'some' || adopt === 'cancel' || adopt === 'fail' ? adopt : 'all',
-        // `&at=galaxy:<id>`, `system:<id>` or `planet:<id>`: where to go first (host.at)
+        // `&at=galaxy:<id>`, `system:<id>`, `planet:<id>` or `verse:<id>`: where to go first (host.at)
         at: startAtParam(p.get('at')),
         // `&depth=1`: groups that are gone into, and a galaxy inside a galaxy (PROTOCOL.md, "Depth")
         depth: p.get('depth') === '1',
+        // `&work=empty`: nothing in the work verse yet, the other verses full (a library with records and no task)
+        emptyWork: p.get('work') === 'empty',
         // `&name=<words>`: the host's name (to see how long names fit)
         name: p.get('name')?.trim() || undefined,
       });

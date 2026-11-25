@@ -70,6 +70,8 @@ export interface FakeHostOptions {
   /** Show depth (PROTOCOL.md, "Depth"): the clusters are groups that are gone into, one inside the other, and in the
    *  verses other than the first the market stall is a galaxy inside the bakery, reached by a portal there. */
   depth?: boolean;
+  /** The work verse holds nothing yet while the other verses do (a host with records and no task). */
+  emptyWork?: boolean;
   /** What adopt() does (default 'all'). */
   adopt?: AdoptMode;
   /** `host.at`: where ORBIT goes first. */
@@ -323,6 +325,8 @@ export function createFakeHost(opts: FakeHostOptions = {}): FakeHost {
   const many = opts.verses !== 'one';
   /** The other verses (map, things, notes), with their own revs. */
   const others = new Map<string, Verse>((saved?.others ?? (many ? otherVerses(current, opts.now) : [])).map((v) => [v.verse, v]));
+  // `emptyWork`: the work verse holds nothing yet, while the other verses (built from the full one above) do
+  if (opts.emptyWork && !saved) current = { ...current, clusters: [], galaxies: [], systems: [], planets: [], beacons: [], arrows: [] };
   let rev = saved?.rev ?? 1;
   let seq = saved?.seq ?? 0;
   let locked = opts.locked || undefined;

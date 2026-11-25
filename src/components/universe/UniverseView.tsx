@@ -8,14 +8,18 @@ import { Logo } from '../shell/NavRail';
 import { ColorPicker, NewGalaxyDialog, NewProjectDialog, type ProjectDraft } from './ProjectForm';
 import { UniverseCanvas } from './Canvas';
 import { UniverseCards } from './Cards';
+import { VerseBar } from './VerseBar';
 import { PROJECT_COLORS } from '../../lib/colors';
 
 export function UniverseView() {
-  const count = useOrbit((s) => s.projects.filter((p) => !p.archived).length);
-  const galaxyCount = useOrbit((s) => s.groups.length);
+  // what is on screen: the work verse, or another verse of the host's (its sky). An empty work verse must not hide
+  // a verse that has records in it, so the count is taken from the verse shown.
+  const count = useOrbit((s) => (s.host?.sky?.projects ?? s.projects).filter((p) => !p.archived).length);
+  const galaxyCount = useOrbit((s) => (s.host?.sky?.groups ?? s.groups).length);
   const { createProject, createGroup, select, toggleExpanded, freeSystemSpot, requestFlight } = useOrbit.getActions();
   const phone = useIsPhone();
   const hosted = useOrbit((s) => !!s.host);
+  const sky = useOrbit((s) => s.host?.sky ?? null);
   const [newSystemIn, setNewSystemIn] = useState<{ groupId: string | null } | null>(null);
   const [newGalaxy, setNewGalaxy] = useState(false);
 
@@ -30,7 +34,20 @@ export function UniverseView() {
 
   const personal = useAbilities().personal;
   // hosted with ORBIT's own records: a first system of one's own, but never the example workspace
-  if (count === 0 && galaxyCount === 0) return hosted && !personal ? <EmptyHosted /> : <FirstRun onCreate={create} hosted={hosted} />;
+  if (count === 0 && galaxyCount === 0) {
+    const onWork = !sky;
+    return (
+      <div className="relative h-full">
+        {/* the other views of the same records stay one click away while this one is empty */}
+        {hosted && (
+          <div className="absolute inset-x-0 top-3 z-10 px-3">
+            <VerseBar ctxGalaxy={null} />
+          </div>
+        )}
+        {hosted && (!personal || !onWork) ? <EmptyHosted /> : <FirstRun onCreate={create} hosted={hosted} />}
+      </div>
+    );
+  }
 
   return (
     <>
